@@ -61,6 +61,11 @@
 | Category | Accepted/Total | Rate | Trend |
 |----------|---------------|------|-------|
 
+## Capability Gaps
+<!-- Potential skills identified by gap signals. Validate before creating. -->
+| Gap | Signal | Occurrences | Status | Notes |
+|-----|--------|-------------|--------|-------|
+
 # Cold Archive
 <!-- Low-scoring entries moved here during distillation. Kept for reference, not actively loaded. -->
 <!-- Format: - [Original entry] (archived: YYYY-MM-DD, reason: [decay/contradicted/consolidated]) -->
