@@ -1,9 +1,9 @@
 # Sir's Profile
 
 ## Personal
-- Name:
-- Timezone:
-- Location:
+- Name: Tyson
+- Timezone: Australia/Adelaide (ACDT, UTC+10:30)
+- Location: Adelaide, Australia
 
 ## Technical Preferences
 - Languages:
