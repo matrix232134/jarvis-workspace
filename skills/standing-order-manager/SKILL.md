@@ -1,6 +1,6 @@
 ---
 name: standing-order-manager
-description: Manages standing orders (pyramids) — creation, execution, reporting, and retirement. Run during heartbeat cycles to execute due orders and weekly to review order health.
+description: Standing order (pyramid) lifecycle management — creation, execution, reporting, and retirement. Use when the owner asks to monitor something ongoing, when creating a recurring check, when reviewing active standing orders, or when the heartbeat detects a standing order needs attention.
 ---
 
 # Standing Order Manager
@@ -74,6 +74,7 @@ Activate these when relevant tools and integrations are connected:
 
 ## Rules
 
+- **Path clarity:** `MEMORY.md` always means the workspace root file (`workspace/MEMORY.md`). Daily execution logs go in `memory/YYYY-MM-DD.md`. Never create or write a MEMORY.md inside the `memory/` directory.
 - Never automate irreversible actions without explicit permission from sir
 - Standing orders respect presence state — failures queue if sir is away/sleep (except Tier 1)
 - Each order has a clear owner (JARVIS) and a clear escalation path (sir)

@@ -72,8 +72,9 @@ Scan MEMORY.md for issues:
 
 ## Rules
 
+- **Path clarity:** `MEMORY.md` always means the workspace root file (`workspace/MEMORY.md`). Daily logs are `memory/YYYY-MM-DD.md`. Prep notes are `memory/YYYY-MM-DD-prep.md`. Never create or write a MEMORY.md inside the `memory/` directory.
 - **Silent operation.** No channel delivery. No announcements.
-- Write only to memory/ files and MEMORY.md.
+- Write only to `memory/` daily files and the root `MEMORY.md`.
 - Do not modify MEMORY.md structure — only update metadata fields and flag items.
 - Structural changes (archiving, adding, removing entries) are reserved for the weekly distillation.
 - If calendar or other integrations are unavailable, skip those steps and note the gap.

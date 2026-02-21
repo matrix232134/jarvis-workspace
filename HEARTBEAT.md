@@ -73,3 +73,5 @@ Based on connections:
 - If items were logged: `HEARTBEAT_LOGGED [count] items`
 - If items were delivered: `HEARTBEAT_DELIVERED [count] items`
 - If standing orders were executed: `HEARTBEAT_ORDERS [count] executed`
+
+**Path clarity:** `MEMORY.md` always means the workspace root file (`workspace/MEMORY.md`). Daily observations go in `memory/YYYY-MM-DD.md`. Never create or write a MEMORY.md inside the `memory/` directory.

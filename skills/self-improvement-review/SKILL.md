@@ -99,6 +99,7 @@ Write to `memory/evolution/YYYY-MM.md`:
 
 ## Rules
 
+- **Path clarity:** `MEMORY.md` always means the workspace root file (`workspace/MEMORY.md`). Evolution reports go in `memory/evolution/`. Never create or write a MEMORY.md inside the `memory/` directory.
 - **Silent operation.** No channel delivery. This is background self-analysis.
 - Write report to `memory/evolution/` directory only.
 - Preserve all historical reports — they show the growth trajectory over months.

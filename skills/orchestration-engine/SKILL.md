@@ -1,6 +1,6 @@
 ---
 name: orchestration-engine
-description: Task routing and capability orchestration framework. Read when facing non-trivial or compound tasks to determine the best execution strategy — which tools, skills, Kimi delegation, subagents, or Lobster workflows to use.
+description: Task routing framework. Read when facing a complex, compound, or multi-step task that requires choosing between tools, delegating to Kimi, spawning subagents, or composing capabilities. Also read when uncertain which approach to take for a non-trivial request.
 ---
 
 # Orchestration Engine — Task Routing & Capability Selection
@@ -215,3 +215,5 @@ Everything routes through JARVIS. Every capability is an extension of your think
 - **Shell outputs** → Translated from technical output to meaningful status
 
 The owner's experience is: "I asked JARVIS. JARVIS answered." The routing, delegation, parallelisation, and orchestration are invisible. That's the standard.
+
+**Path clarity:** `MEMORY.md` always means the workspace root file (`workspace/MEMORY.md`). Daily logs are `memory/YYYY-MM-DD.md`. Never create or write a MEMORY.md inside the `memory/` directory.

@@ -1,6 +1,6 @@
 ---
 name: self-expansion
-description: Process for JARVIS to identify capability gaps and grow his own skills over time. Covers gap identification, validation, skill drafting, owner approval, and activation. Read during monthly evolution reviews or when a capability gap is noticed.
+description: Capability gap identification and skill creation process. Read when noticing a repeated task pattern that could benefit from a dedicated skill, when a task fails due to missing tooling, when the owner asks for a new recurring capability, or during monthly self-improvement reviews.
 ---
 
 # Self-Expansion — Growing Your Own Capabilities
@@ -156,3 +156,5 @@ During monthly self-improvement reviews (via `self-improvement-review` skill), i
 - Propose updates to the orchestration engine if routing rules need refinement
 
 The framework itself grows. The orchestration-engine skill and this self-expansion skill are living documents that evolve as JARVIS's capabilities and sir's needs change.
+
+**Path clarity:** `MEMORY.md` always means the workspace root file (`workspace/MEMORY.md`). Capability gaps, skill records, and all persistent knowledge go in the root MEMORY.md. Never create or write a MEMORY.md inside the `memory/` directory.

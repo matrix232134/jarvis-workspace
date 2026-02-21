@@ -1,6 +1,6 @@
 ---
 name: observation-engine
-description: Deep 4-layer observation processing for complex findings that need more analysis than a standard heartbeat cycle provides. Invoked by heartbeat when an observation scores Tier 2+ and has cross-references.
+description: Deep 4-layer observation processing for complex findings that need more analysis than a standard heartbeat cycle. Invoked from the heartbeat when a Tier 2 or higher observation has cross-references and needs deeper analysis before delivery or action.
 ---
 
 # Observation Engine — Deep Processing
@@ -69,6 +69,7 @@ Additionally:
 
 ## Rules
 
+- **Path clarity:** `MEMORY.md` always means the workspace root file (`workspace/MEMORY.md`). Daily observation logs go in `memory/YYYY-MM-DD.md`. Never create or write a MEMORY.md inside the `memory/` directory.
 - This skill runs silently unless the observation warrants delivery to a channel.
 - Always write findings to memory, even if not delivering.
 - Cross-referencing is the core value. A standalone fact is less useful than a connected one.

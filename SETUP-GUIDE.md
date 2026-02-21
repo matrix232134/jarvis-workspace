@@ -130,24 +130,24 @@ openclaw system heartbeat last
 ### Add MCP Servers
 Get API keys for each, then add to config:
 
-**Brave Search** (free tier: https://brave.com/search/api/):
+**Tavily Search** (free tier: https://tavily.com/):
 ```bash
-openclaw config set provider.mcpServers.brave-search.command "npx"
-openclaw config set provider.mcpServers.brave-search.args '[ "-y", "@anthropic-ai/mcp-server-brave-search" ]'
-openclaw config set provider.mcpServers.brave-search.env.BRAVE_API_KEY "YOUR_KEY"
+mcporter config add tavily --command "npx" --arg "-y" --arg "tavily-mcp" --env "TAVILY_API_KEY=YOUR_KEY" --description "Web search via Tavily" --scope home
 ```
 
 **GitHub** (free: https://github.com/settings/tokens):
 ```bash
-openclaw config set provider.mcpServers.github.command "npx"
-openclaw config set provider.mcpServers.github.args '[ "-y", "@modelcontextprotocol/server-github" ]'
-openclaw config set provider.mcpServers.github.env.GITHUB_TOKEN "ghp_YOUR_TOKEN"
+mcporter config add github --command "npx" --arg "-y" --arg "@modelcontextprotocol/server-github" --env "GITHUB_PERSONAL_ACCESS_TOKEN=ghp_YOUR_TOKEN" --description "GitHub API tools" --scope home
 ```
 
 **Filesystem** (no key needed):
 ```bash
-openclaw config set provider.mcpServers.filesystem.command "npx"
-openclaw config set provider.mcpServers.filesystem.args '[ "-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\tyson" ]'
+mcporter config add filesystem --command "npx" --arg "-y" --arg "@modelcontextprotocol/server-filesystem" --arg "C:\\Users\\tyson" --description "Read/write files on this machine" --scope home
+```
+
+**Playwright** (no key needed):
+```bash
+mcporter config add playwright --command "npx" --arg "-y" --arg "@playwright/mcp" --description "Browser automation via Playwright" --scope home
 ```
 
 Restart gateway after each: `openclaw gateway restart`

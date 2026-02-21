@@ -14,6 +14,7 @@
 # Lessons
 <!-- Cause-and-effect judgments. Each entry must have a WHY, not just a WHAT. -->
 <!-- Format: - [What happened/What to do] — [Why / What caused it / What we learned]. ([date]) {imp:N, created:YYYY-MM-DD, accessed:YYYY-MM-DD, hits:N} -->
+- Core environment: Windows 11 Pro, Git Bash/PowerShell, Node.js v24.13.1, workspace at C:\Users\tyson\.openclaw\workspace, primary model claude-opus-4-6, channel Telegram — foundational system facts for all operations. (2026-02-22) {imp:5, created:2026-02-22, accessed:2026-02-22, hits:2}
 
 # Patterns
 <!-- Cross-session observations. Requires 3+ data points. No speculation. -->

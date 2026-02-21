@@ -128,8 +128,9 @@ Before writing changes, verify:
 
 ## Rules
 
+- **Path clarity:** `MEMORY.md` always means the workspace root file (`workspace/MEMORY.md`). Daily logs are read from `memory/YYYY-MM-DD.md`. Archives go in `memory/archive/`. Never create or write a MEMORY.md inside the `memory/` directory.
 - Do NOT deliver results to any channel. This is background maintenance.
-- Write changes directly to MEMORY.md using the file tools.
+- Write changes directly to the root `MEMORY.md` using the file tools.
 - Preserve existing entries in MEMORY.md — append new, archive old. Never silently delete.
 - If no meaningful preferences, lessons, or patterns were found this week, that's fine. Don't force entries.
 - Commit changes to git if the workspace is version-controlled.
