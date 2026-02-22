@@ -72,34 +72,33 @@ icacls "$env:USERPROFILE\.openclaw\credentials" /grant:r "${env:USERNAME}:(OI)(C
 ```
 
 ### 8. Set Up Morning Briefing Cron
-Replace TIMEZONE with your timezone (e.g., America/New_York, America/Chicago, America/Los_Angeles):
 ```bash
-openclaw cron add --name "morning-briefing" --cron "0 7 * * *" --tz "TIMEZONE" --session isolated --announce --channel telegram --message "Deliver the morning briefing. Check system health, overnight events, open items, calendar (if available). [VOICE] under 30 seconds reading. [DISPLAY] for details. Vary the opening."
+openclaw cron add --name "morning-briefing" --cron "0 7 * * *" --tz "Australia/Adelaide" --session isolated --announce --channel telegram --message "Deliver the morning briefing. Check system health, overnight events, open items, calendar (if available). [VOICE] under 30 seconds reading. [DISPLAY] for details. Vary the opening."
 ```
 
 ### 9. Set Up Weekly Memory Distillation
 ```bash
-openclaw cron add --name "weekly-distill" --cron "0 3 * * 0" --tz "TIMEZONE" --session isolated --model "anthropic/claude-sonnet-4-5" --message "Run memory distillation. Read all memory/*.md files from the past week. Follow the memory-distill skill instructions. Extract preferences, lessons, and patterns. Update MEMORY.md. Do not deliver results."
+openclaw cron add --name "weekly-distill" --cron "0 3 * * 0" --tz "Australia/Adelaide" --session isolated --model "anthropic/claude-sonnet-4-5" --message "Run memory distillation. Read all memory/*.md files from the past week. Follow the memory-distill skill instructions. Extract preferences, lessons, and patterns. Update MEMORY.md. Do not deliver results."
 ```
 
 ### 10. Set Up Nightly Sleep-Compute
 ```bash
-openclaw cron add --name "sleep-compute" --cron "0 3 * * *" --tz "TIMEZONE" --session isolated --model "anthropic/claude-sonnet-4-5" --message "Run sleep-compute skill. Cross-reference today's memory entries, prepare tomorrow's briefing data, run memory maintenance. Do not deliver results."
+openclaw cron add --name "sleep-compute" --cron "0 3 * * *" --tz "Australia/Adelaide" --session isolated --model "anthropic/claude-sonnet-4-5" --message "Run sleep-compute skill. Cross-reference today's memory entries, prepare tomorrow's briefing data, run memory maintenance. Do not deliver results."
 ```
 
 ### 11. Set Up Daily Backup
 ```bash
-openclaw cron add --name "daily-backup" --cron "0 4 * * *" --tz "TIMEZONE" --session isolated --message "Backup workspace. Run: cd ~/.openclaw/workspace && git add -A && git diff --cached --quiet || git commit -m 'Auto-backup $(date +%Y-%m-%d)'"
+openclaw cron add --name "daily-backup" --cron "0 4 * * *" --tz "Australia/Adelaide" --session isolated --message "Backup workspace. Run: cd ~/.openclaw/workspace && git add -A && git diff --cached --quiet || git commit -m 'Auto-backup $(date +%Y-%m-%d)'"
 ```
 
 ### 12. Set Up Monthly Evolution Review
 ```bash
-openclaw cron add --name "monthly-evolution" --cron "0 5 1 * *" --tz "TIMEZONE" --session isolated --model "anthropic/claude-sonnet-4-5" --message "Run self-improvement-review skill. Generate evolution report for last month. Write to memory/evolution/. Do not deliver results."
+openclaw cron add --name "monthly-evolution" --cron "0 5 1 * *" --tz "Australia/Adelaide" --session isolated --model "anthropic/claude-sonnet-4-5" --message "Run self-improvement-review skill. Generate evolution report for last month. Write to memory/evolution/. Do not deliver results."
 ```
 
 ### 13. Set Up Weekly Standing Order Review
 ```bash
-openclaw cron add --name "standing-order-review" --cron "0 4 * * 1" --tz "TIMEZONE" --session isolated --message "Review all standing orders in MEMORY.md. Check health, execution history, and suggest retirements for inactive orders. Update MEMORY.md Standing Orders table."
+openclaw cron add --name "standing-order-review" --cron "0 4 * * 1" --tz "Australia/Adelaide" --session isolated --message "Review all standing orders in MEMORY.md. Check health, execution history, and suggest retirements for inactive orders. Update MEMORY.md Standing Orders table."
 ```
 
 ### 14. Initialize Git for Workspace
@@ -124,6 +123,41 @@ openclaw gateway status
 openclaw channels status --probe
 openclaw system heartbeat last
 ```
+
+### 17. Auto-Start on Boot
+
+JARVIS should start automatically when the machine boots. Two options:
+
+**Option A — Task Scheduler (recommended, needs admin):**
+
+Run in an elevated PowerShell terminal:
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File "$env:USERPROFILE\.openclaw\setup-autostart.ps1"
+```
+
+This registers a scheduled task that starts the gateway at boot, retries 3 times on failure, and runs without requiring interactive login.
+
+Verify: `Get-ScheduledTask -TaskName "JARVIS Gateway"`
+
+**Option B — Startup folder (no admin needed, runs on login):**
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File "$env:USERPROFILE\.openclaw\setup-autostart.ps1" -StartupFolder
+```
+
+This creates a shortcut in the Windows Startup folder. Gateway starts when the user logs in. For a dedicated machine with auto-login, this is equivalent to Option A.
+
+### 18. Desktop Control Panel
+
+A "JARVIS Control" shortcut on the desktop provides quick access to start/stop/restart the gateway and check system status.
+
+Create the shortcut:
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File "$env:USERPROFILE\.openclaw\create-desktop-shortcut.ps1"
+```
+
+Double-click "JARVIS Control" on your desktop to open the control panel.
+
+---
 
 ## Phase 2+ (After Foundation is Verified)
 

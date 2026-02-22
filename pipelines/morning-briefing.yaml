@@ -9,7 +9,7 @@ steps:
     command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Check the cron execution logs from the last 12 hours. Summarize which jobs ran, their outcomes (success/failure), and any anomalies. If no logs are available, note that.","input":{"workspace":"$WORKSPACE"},"schema":{"type":"object","properties":{"jobs_checked":{"type":"integer"},"summary":{"type":"string"},"failures":{"type":"array","items":{"type":"string"}},"anomalies":{"type":"array","items":{"type":"string"}}},"required":["jobs_checked","summary","failures","anomalies"],"additionalProperties":false}}'
 
   - id: check_prep
-    command: cat "$WORKSPACE/memory/prep-next-day.md" 2>/dev/null || echo "No prep note found."
+    command: powershell.exe -NoProfile -Command "$d = (Get-Date).ToString('yyyy-MM-dd'); $f = \"$env:WORKSPACE\\memory\\$d-prep.md\"; if (Test-Path $f) { Get-Content $f -Raw } else { 'No prep note found.' }"
 
   - id: check_standing_orders
     command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Read the Standing Orders table from MEMORY.md. Report the status of each active order: name, last_run, last_result, and whether any are overdue or in failure state.","input":{"memory_file":"$WORKSPACE/MEMORY.md"},"schema":{"type":"object","properties":{"active_orders":{"type":"integer"},"orders":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"status":{"type":"string"},"last_run":{"type":"string"},"last_result":{"type":"string"}},"required":["name","status"]}},"overdue":{"type":"array","items":{"type":"string"}},"failures":{"type":"array","items":{"type":"string"}}},"required":["active_orders","orders","overdue","failures"],"additionalProperties":false}}'
