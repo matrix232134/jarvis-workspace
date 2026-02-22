@@ -1,0 +1,16 @@
+name: pre-flight
+args:
+  request:
+    default: ""
+  available_tools:
+    default: ""
+steps:
+  - id: assess
+    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"You are a task assessment engine. Analyze the following user request and break it down into: core_task (one sentence), characteristics (list of relevant traits like reversibility, external_effects, complexity), sub_tasks (numbered list of discrete steps), required_capabilities (list of tools, APIs, or skills needed to complete each sub-task). Be precise and exhaustive about required_capabilities.","input":{"request":"$request"},"schema":{"type":"object","properties":{"core_task":{"type":"string"},"characteristics":{"type":"array","items":{"type":"string"}},"sub_tasks":{"type":"array","items":{"type":"object","properties":{"step":{"type":"integer"},"description":{"type":"string"},"capabilities_needed":{"type":"array","items":{"type":"string"}}},"required":["step","description","capabilities_needed"]}},"required_capabilities":{"type":"array","items":{"type":"string"}}},"required":["core_task","characteristics","sub_tasks","required_capabilities"],"additionalProperties":false}}'
+
+  - id: capability_check
+    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Compare the required capabilities against the available tools. For each required capability, determine if it is available (exact match or close equivalent in available tools), missing (no match), or partial (tool exists but may not fully cover the need). Return a verdict: can_proceed (true if all critical capabilities are available or have workarounds), missing_capabilities (list of what is not available), available_capabilities (list of what matched), and recommendations (brief notes on approach).","input":{"assessment":$assess.json,"available_tools":"$available_tools"},"schema":{"type":"object","properties":{"can_proceed":{"type":"boolean"},"available_capabilities":{"type":"array","items":{"type":"string"}},"missing_capabilities":{"type":"array","items":{"type":"string"}},"recommendations":{"type":"array","items":{"type":"string"}}},"required":["can_proceed","available_capabilities","missing_capabilities","recommendations"],"additionalProperties":false}}'
+    stdin: $assess.stdout
+
+  - id: route
+    command: echo $capability_check.json

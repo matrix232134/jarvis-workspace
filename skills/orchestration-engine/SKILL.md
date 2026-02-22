@@ -16,6 +16,27 @@ This skill provides the detailed decision framework for routing tasks to the rig
 
 For simple, obvious tasks (Class 1 or Class 2), you don't need this skill. Your instincts from AGENTS.md are sufficient.
 
+## MANDATORY PRE-FLIGHT — Classes 4, 5, and 6
+
+**This is not optional.** Before executing any Class 4 (Creation), Class 5 (Monitoring setup), or Class 6 (Coordination) task, you MUST run the pre-flight pipeline.
+
+**Invoke:**
+```json
+{ "action": "run", "pipeline": "pipelines/pre-flight.yaml", "argsJson": "{\"request\":\"<the user's request>\",\"available_tools\":\"<comma-separated list of currently available tools>\"}" }
+```
+
+**Interpret the result:**
+- If `can_proceed` is **true**: Proceed with execution using the recommended approach
+- If `can_proceed` is **false**: Invoke the acquisition pipeline to resolve missing capabilities:
+  ```json
+  { "action": "run", "pipeline": "pipelines/acquisition.yaml", "argsJson": "{\"missing_capabilities\":\"<from pre-flight output>\",\"context\":\"<original request>\"}" }
+  ```
+  The acquisition pipeline will halt at an approval gate — the owner must approve before any installation occurs.
+
+**Do NOT skip pre-flight.** Do NOT work around missing capabilities by improvising. If you can't do it properly, say so and acquire what's needed.
+
+**Classes 1, 2, 3, 7:** Pre-flight is not required. These are simple enough that the five-second assessment in your head is sufficient.
+
 ## The Five-Second Assessment — Full Characteristic Analysis
 
 When the task isn't immediately obvious, analyse these characteristics:
@@ -203,6 +224,22 @@ Existing automation infrastructure in MEMORY.md — check before creating new me
 - Tasks with high variability in execution path
 
 **Maturity path:** Manual Class 6 execution → Validated pattern → Lobster workflow. Never skip the validation step.
+
+## Lobster Pipelines — Available Workflows
+
+| Pipeline | File | Purpose | Trigger |
+|----------|------|---------|---------|
+| **pre-flight** | `pipelines/pre-flight.yaml` | Assess task, check capabilities, route | MANDATORY before Class 4/5/6 tasks |
+| **acquisition** | `pipelines/acquisition.yaml` | Search, vet, and install missing capabilities | When pre-flight returns `can_proceed: false` |
+| **daily-backup** | `pipelines/daily-backup.yaml` | Git stage, commit, push workspace | Daily cron (4am) |
+| **morning-briefing** | `pipelines/morning-briefing.yaml` | Gather metrics + synthesise briefing | Daily cron (7am) |
+| **irreversible-action** | `pipelines/templates/irreversible-action.yaml` | Preview → approve → execute → log pattern | Template for any irreversible external action |
+
+**Invoking pipelines:** Use the Lobster tool with `action: "run"` and the pipeline path relative to workspace. Pass parameters via `argsJson`.
+
+**Approval gates:** When a pipeline returns `status: "needs_approval"`, present the approval context to the owner. Resume with `action: "resume"`, the `resumeToken`, and `approve: true/false`.
+
+**Creating new pipelines:** When a Class 6 pattern has been validated through manual execution at least twice, consider codifying it as a new Lobster pipeline. Follow the maturity path: manual → validated → codified.
 
 ## The Integration Principle
 

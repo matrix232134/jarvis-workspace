@@ -1,0 +1,23 @@
+name: irreversible-action-template
+args:
+  action_description:
+    default: ""
+  action_command:
+    default: ""
+  context:
+    default: ""
+steps:
+  - id: preview
+    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Present a clear preview of what this irreversible action will do. Include: what will change, what cannot be undone, any side effects, and the exact command that will be executed. Format for owner review.","input":{"action_description":"$action_description","action_command":"$action_command","context":"$context"},"schema":{"type":"object","properties":{"summary":{"type":"string"},"changes":{"type":"array","items":{"type":"string"}},"irreversible_effects":{"type":"array","items":{"type":"string"}},"side_effects":{"type":"array","items":{"type":"string"}},"exact_command":{"type":"string"}},"required":["summary","changes","irreversible_effects","exact_command"],"additionalProperties":false}}'
+
+  - id: owner_approval
+    command: echo $preview.json
+    approval: required
+
+  - id: execute
+    command: $action_command
+    condition: $owner_approval.approved
+
+  - id: log
+    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Write a concise log entry for the daily memory file. Include: timestamp, action taken, result, and any notes. Format as a single markdown bullet point suitable for appending to a daily log file.","input":{"action":"$action_description","command":"$action_command","result":"$execute","approved":true},"schema":{"type":"object","properties":{"log_entry":{"type":"string"},"timestamp":{"type":"string"}},"required":["log_entry","timestamp"],"additionalProperties":false}}'
+    condition: $owner_approval.approved

@@ -1,0 +1,30 @@
+name: acquisition
+args:
+  missing_capabilities:
+    default: "[]"
+  context:
+    default: ""
+steps:
+  - id: search
+    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"For each missing capability, identify the best available solution. Consider: MCP servers (npmjs.com @modelcontextprotocol packages), OpenClaw plugins (bundled stock plugins), npm packages, or native OS commands. For each, provide: capability name, solution_type (mcp_server|plugin|npm_package|native_command), package_name or command, install_command, and security_notes (what access it requires, any risks).","input":{"missing_capabilities":$missing_capabilities,"context":"$context"},"schema":{"type":"object","properties":{"solutions":{"type":"array","items":{"type":"object","properties":{"capability":{"type":"string"},"solution_type":{"type":"string","enum":["mcp_server","plugin","npm_package","native_command"]},"package_name":{"type":"string"},"install_command":{"type":"string"},"security_notes":{"type":"string"}},"required":["capability","solution_type","package_name","install_command","security_notes"]}}},"required":["solutions"],"additionalProperties":false}}'
+
+  - id: vet
+    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Security review each proposed solution. Check: is the package well-known and maintained? Does it require network access? Does it write to the filesystem outside its scope? Does it require elevated permissions? Rate each as safe, caution, or reject. Provide reasoning.","input":$search.json,"schema":{"type":"object","properties":{"vetted":{"type":"array","items":{"type":"object","properties":{"capability":{"type":"string"},"package_name":{"type":"string"},"verdict":{"type":"string","enum":["safe","caution","reject"]},"reasoning":{"type":"string"}},"required":["capability","package_name","verdict","reasoning"]}}},"required":["vetted"],"additionalProperties":false}}'
+    stdin: $search.stdout
+
+  - id: present_plan
+    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Format an installation plan for owner approval. List each capability, the proposed solution, its security verdict, and the exact install command. Mark any caution or reject items clearly. This will be shown to the owner for approval before any installation occurs.","input":{"solutions":$search.json,"vetting":$vet.json},"schema":{"type":"object","properties":{"plan_summary":{"type":"string"},"items":{"type":"array","items":{"type":"object","properties":{"capability":{"type":"string"},"solution":{"type":"string"},"verdict":{"type":"string"},"install_command":{"type":"string"}},"required":["capability","solution","verdict","install_command"]}}},"required":["plan_summary","items"],"additionalProperties":false}}'
+    stdin: $vet.stdout
+
+  - id: owner_approval
+    command: echo $present_plan.json
+    approval: required
+
+  - id: install
+    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Execute the approved installation plan. For each approved item, run the install command and report the result. Only install items that passed vetting (safe or caution with owner approval). Return status for each.","input":$present_plan.json}'
+    condition: $owner_approval.approved
+
+  - id: verify
+    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Verify each installed capability is working. Run a simple test for each (e.g., list tools for MCP servers, check plugin loaded status). Report pass/fail for each.","input":$install.json,"schema":{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"capability":{"type":"string"},"status":{"type":"string","enum":["pass","fail"]},"details":{"type":"string"}},"required":["capability","status","details"]}}},"required":["results"],"additionalProperties":false}}'
+    stdin: $install.stdout
+    condition: $owner_approval.approved

@@ -1,0 +1,17 @@
+name: daily-backup
+env:
+  WORKSPACE: C:\Users\tyson\.openclaw\workspace
+steps:
+  - id: stage
+    command: git -C "$WORKSPACE" add -A
+
+  - id: check
+    command: git -C "$WORKSPACE" diff --cached --stat
+
+  - id: commit
+    command: git -C "$WORKSPACE" commit -m "Auto-backup $(date +%Y-%m-%d)"
+    condition: $check.stdout
+
+  - id: push
+    command: git -C "$WORKSPACE" push origin master
+    condition: $commit.stdout
