@@ -23,7 +23,9 @@
 - `Format-Volume` — destructive, never run without explicit confirmation
 - Any command that deletes files, drops databases, or modifies system configuration
 
-## Monitoring Services (Phase 3+)
+## Not Yet Installed — Future Services
+
+These are planned but NOT currently available. Do not attempt to query these.
 
 ### Langfuse (LLM Observability)
 - URL: http://localhost:3000 (when configured)
