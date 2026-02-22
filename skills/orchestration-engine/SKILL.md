@@ -71,25 +71,51 @@ Research request received
 
 **Synthesis rule:** Regardless of who gathered the data, YOU synthesise. Kimi returns raw findings. You apply sir's context, filter for relevance, and deliver in your voice.
 
+**Kimi synthesis process (mandatory when Kimi is used):**
+1. Kimi raw output arrives
+2. Read relevant MEMORY.md sections (owner preferences, past decisions, constraints)
+3. Filter: what's relevant to THIS owner? Remove options that conflict with known preferences.
+4. Rank: given what you know about sir, what's the best recommendation?
+5. Present in JARVIS voice — `[VOICE]` is a concise, definitive recommendation. `[DISPLAY]` has the supporting data for sir to verify.
+
+**Private research:** Private data never leaves the local environment. For wide-scope private research (sir's files, memory, local systems), use subagents (Haiku) for parallel local data gathering rather than Kimi. This includes financial data, personal notes, credentials, and anything in the workspace.
+
 ### Class 4 — Creation & Building
 
+**The dividing-line question:** Is the primary output a document someone reads, or an artifact a machine runs? Documents, reports, analyses, structured content → 4a. Code, scripts, configs, infrastructure → 4b. If in doubt: "Can I build this in one response without installing anything new?" Yes → 4a. No → 4b.
+
+#### Class 4a — Content Creation
+
 ```
-Creation request received
-├─ Code / technical artifact?
-│  ├─ Simple (single file, clear spec)?
-│  │  └─ Direct build. Forge mode if non-trivial.
-│  ├─ Complex (multi-component)?
-│  │  └─ Forge mode. Consider subagents for independent components.
-│  └─ Visual / frontend?
-│     └─ Consider Kimi K2.5 visual coding if applicable
-├─ Document / structured content?
-│  ├─ Short (< 1 page)?
-│  │  └─ Write directly
-│  └─ Long / structured (report, analysis, multi-section)?
-│     └─ Kimi Agent mode for draft generation, then refine in JARVIS voice
+Content creation request received
+├─ Short (< 1 page)?
+│  └─ Write directly in JARVIS voice
+├─ Long / structured (report, analysis, multi-section)?
+│  ├─ Contains private data?
+│  │  └─ Write locally, use own reasoning for structure
+│  └─ Public / general content?
+│     └─ Kimi Agent mode for draft → refine in JARVIS voice
+└─ Requires research first?
+   └─ Class 3 first, then return to 4a with findings
+```
+
+No pre-flight pipeline needed for 4a. This is one-sitting work.
+
+#### Class 4b — Technical Building
+
+```
+Technical creation request received
+├─ Simple (single file, clear spec)?
+│  └─ Direct build. Forge mode.
+├─ Complex (multi-component)?
+│  └─ Forge mode. Consider subagents for independent components.
+├─ Visual / frontend?
+│  └─ Consider Kimi K2.5 visual coding if applicable
 └─ Configuration / infrastructure?
    └─ Direct build. Shell + MCP tools.
 ```
+
+Pre-flight pipeline required for 4b (see MANDATORY PRE-FLIGHT above). If pre-flight identifies missing capabilities → acquisition pipeline with owner approval.
 
 ### Class 5 — Monitoring & Ongoing
 
@@ -136,6 +162,21 @@ Most real requests are compound. "Set up monitoring for the API" is Class 5 (ong
 4. Only announce the plan if the task has 3+ meaningful components
 
 **Rule:** Don't over-decompose. "Search the web for X" is Class 2, not Class 6 with subtasks "open browser," "type query," "read results." Decompose at the level of meaningful, independent work units.
+
+**Example — "Research competitors and build a comparison dashboard":**
+
+```
+Decomposition:
+├─ Subtask 1: Research competitors (Class 3 — Kimi Agent Swarm, public data)
+├─ Subtask 2: Synthesise findings into structured data (Class 4a — content)
+├─ Subtask 3: Build dashboard frontend (Class 4b — technical, Forge)
+├─ Subtask 4: Set up data refresh schedule (Class 5 — standing order)
+
+Dependencies: 1 → 2 → 3, 4 depends on 3
+Parallel: None (sequential dependency chain)
+```
+
+**Key principle:** After decomposition, each subtask is independently classified and routed through its own class handling. A Class 6 task is never executed as Class 6 — it is always broken into Classes 1-5 and P.
 
 ## Capability Map
 
