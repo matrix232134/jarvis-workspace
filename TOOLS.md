@@ -23,6 +23,21 @@
 - `Format-Volume` — destructive, never run without explicit confirmation
 - Any command that deletes files, drops databases, or modifies system configuration
 
+## JARVIS Bridge (Multi-Device Gateway)
+- Location: C:\Users\tyson\jarvis-bridge
+- Port: 19300 (WebSocket)
+- Purpose: Routes chat from device agents to OpenClaw gateway via HTTP API
+- Start: `cd ~/jarvis-bridge && npm start`
+- Config: bridge-config.json (contains OpenClaw token and bridge secret)
+- Devices: devices.json (auto-generated on first pairing)
+
+## JARVIS Agent (Device Client)
+- Location: C:\Users\tyson\jarvis-agent
+- Purpose: WebSocket client that connects to Bridge for CLI chat with JARVIS
+- Start: `cd ~/jarvis-agent && npm start`
+- Config: agent-config.json (bridge URL, credentials saved after first pairing)
+- Commands: /quit or /exit to disconnect
+
 ## Not Yet Installed — Future Services
 
 These are planned but NOT currently available. Do not attempt to query these.
