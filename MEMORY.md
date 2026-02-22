@@ -52,7 +52,8 @@
 |------|-----------|----------|--------|
 
 ## Outcome Log
-<!-- Format: | date | recommendation | outcome (success/partial/fail) | lesson | -->
+<!-- Format: | date | recommendation | outcome (success/partial/fail/degraded) | lesson | -->
+<!-- "degraded" = task completed but via fallback approach, not intended pipeline -->
 | Date | Recommendation | Outcome | Lesson |
 |------|---------------|---------|--------|
 
@@ -64,6 +65,8 @@
 
 ## Capability Gaps
 <!-- Potential skills identified by gap signals. Validate before creating. -->
+<!-- ALSO log here: capabilities that were needed during a task but unavailable. -->
+<!-- These are immediate, concrete gaps — not speculative future needs. -->
 | Gap | Signal | Occurrences | Status | Notes |
 |-----|--------|-------------|--------|-------|
 

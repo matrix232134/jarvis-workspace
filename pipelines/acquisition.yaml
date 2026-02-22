@@ -1,4 +1,5 @@
 name: acquisition
+# requires: [tool:llm-task, shell:npm, approval:owner]
 args:
   missing_capabilities:
     default: "[]"

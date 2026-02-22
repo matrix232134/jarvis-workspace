@@ -1,4 +1,5 @@
 name: pre-flight
+# requires: [tool:llm-task]
 args:
   request:
     default: ""

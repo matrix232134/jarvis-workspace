@@ -16,9 +16,18 @@ This skill provides the detailed decision framework for routing tasks to the rig
 
 For simple, obvious tasks (Class 1 or Class 2), you don't need this skill. Your instincts from AGENTS.md are sufficient.
 
-## MANDATORY PRE-FLIGHT — Classes 4, 5, and 6
+## MANDATORY PRE-FLIGHT — Classes 3 (Wide), 4, 5, and 6
 
-**This is not optional.** Before executing any Class 4 (Creation), Class 5 (Monitoring setup), or Class 6 (Coordination) task, you MUST run the pre-flight pipeline.
+**This is not optional.** Before executing any of the following, you MUST run the pre-flight pipeline:
+
+- **Class 4** (Creation) — all subtypes
+- **Class 5** (Monitoring setup)
+- **Class 6** (Coordination)
+- **Class 3 (Wide)** — any research task that requires 3+ sources, sub-agents, Kimi Agent Swarm, or external search APIs
+
+**Class 3 (Narrow)** — research using 1-2 sources with tools you've already verified are available — does NOT require pre-flight. The test: "Can I answer this with tools I've successfully used in the last 24 hours?" If yes, proceed. If no, pre-flight.
+
+**Classes 1, 2, 7:** Pre-flight is not required. These are simple enough that the five-second assessment is sufficient.
 
 **Invoke:**
 ```json
@@ -34,8 +43,6 @@ For simple, obvious tasks (Class 1 or Class 2), you don't need this skill. Your 
   The acquisition pipeline will halt at an approval gate — the owner must approve before any installation occurs.
 
 **Do NOT skip pre-flight.** Do NOT work around missing capabilities by improvising. If you can't do it properly, say so and acquire what's needed.
-
-**Classes 1, 2, 3, 7:** Pre-flight is not required. These are simple enough that the five-second assessment in your head is sufficient.
 
 ## The Five-Second Assessment — Full Characteristic Analysis
 
@@ -56,6 +63,20 @@ When the task isn't immediately obvious, analyse these characteristics:
 
 ### Class 3 — Research & Synthesis
 
+**Pre-flight gate (check FIRST):**
+```
+Research request received
+├─ Narrow scope (1-2 sources, tools verified available)?
+│  └─ Proceed without pre-flight
+├─ Wide scope OR requires sub-agents/Kimi/external APIs?
+│  └─ RUN PRE-FLIGHT PIPELINE FIRST
+│     ├─ can_proceed = true → execute research
+│     └─ can_proceed = false → report what's missing, offer genuine alternatives
+└─ Uncertain?
+   └─ Run pre-flight. The cost is low. The cost of faking is high.
+```
+
+**Routing (after pre-flight passes or narrow scope confirmed):**
 ```
 Research request received
 ├─ Narrow scope (1-2 sources sufficient)?
@@ -79,6 +100,58 @@ Research request received
 5. Present in JARVIS voice — `[VOICE]` is a concise, definitive recommendation. `[DISPLAY]` has the supporting data for sir to verify.
 
 **Private research:** Private data never leaves the local environment. For wide-scope private research (sir's files, memory, local systems), use subagents (Haiku) for parallel local data gathering rather than Kimi. This includes financial data, personal notes, credentials, and anything in the workspace.
+
+## Research Verification Gate
+
+Before synthesizing any Class 3 output, verify that research actually occurred. This gate runs after data gathering and before synthesis, regardless of whether Kimi, sub-agents, or own tools were used.
+
+### The Checklist
+
+For each claim or recommendation in the planned output, verify:
+
+| Check | Pass Condition | Fail Action |
+|-------|---------------|-------------|
+| **Source exists** | Claim traces to a specific search result, document, or API response | Remove claim or label as "unverified — from training knowledge" |
+| **Source is current** | Source date is within acceptable window for the topic (news: days, tech: months, facts: years) | Flag as potentially outdated, search for newer source |
+| **Source is primary** | Claim cites original source, not a secondary aggregator | Follow to primary if possible, note if not |
+| **Conflicting evidence checked** | At least one search attempted for counter-evidence | Add contrarian view or note "no contradicting sources found" |
+
+### Enforcement
+
+- **If 0 searches were performed:** Do not synthesize. Report that research could not be conducted and why. Offer training-knowledge alternative clearly labeled as such.
+- **If fewer than 50% of claims have real sources:** Label the output explicitly: "Partial research — [N]% of claims are from live sources, remainder from training knowledge."
+- **If all claims have real sources:** Proceed with synthesis normally.
+
+### The Synthesis Stamp
+
+Every research output includes a metadata block (in [DISPLAY], not [VOICE]):
+
+```
+### Research Metadata
+- Sources consulted: [N]
+- Live searches performed: [N]
+- Knowledge-only claims: [N] of [total]
+- Confidence: [High/Medium/Low]
+- Limitations: [what couldn't be verified]
+```
+
+This is not optional. It is the receipt that proves the work was done.
+
+## Trust Gate (All Classes)
+
+After classification and before execution, check MEMORY.md Trust State for the relevant category:
+
+- If **Advisory**: Present plan → wait for approval → execute
+- If **Guided**: Notify → execute → report
+- If **Autonomous**: Execute → log
+
+If execution encounters a material change (capability missing, approach pivot required):
+- PAUSE execution
+- REVERT to Advisory for this specific decision
+- Present the changed situation and options
+- Wait for approval before continuing
+
+This is non-negotiable. The whole point of trust calibration is that it gates action. A trust table that isn't checked is decorative.
 
 ### Class 4 — Creation & Building
 

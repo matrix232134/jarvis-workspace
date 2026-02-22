@@ -16,6 +16,7 @@ Determine sir's current state from channel activity:
 
 ## Step 2 — Gather Observations
 
+- **Run capability-audit skill (lightweight mode)** — verify previously-available capabilities are still healthy. If any capability status changed, update the inventory and log the change.
 - Check memory/ for open items or pending tasks from recent conversations
 - Run system-health checks if available (CPU, memory, disk, gateway)
 - Check for approaching scheduled events, cert expiry, deadlines

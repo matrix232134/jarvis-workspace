@@ -1,4 +1,5 @@
 name: daily-backup
+# requires: [shell:git]
 env:
   WORKSPACE: C:\Users\tyson\.openclaw\workspace
 steps:
