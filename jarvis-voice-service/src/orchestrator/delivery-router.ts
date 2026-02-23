@@ -42,13 +42,14 @@ const TAG_MAP: Record<string, ParserState> = {
 const MAX_TAG_BUFFER = 200;
 
 function parseArtifactAttributes(inner: string): ArtifactMeta {
-  const typeMatch = inner.match(/type="([^"]+)"/);
-  const titleMatch = inner.match(/title="([^"]+)"/);
-  const langMatch = inner.match(/language="([^"]+)"/);
+  function getAttr(name: string): string | undefined {
+    const match = inner.match(new RegExp(`${name}\\s*=\\s*(?:"([^"]+)"|'([^']+)'|(\\S+))`));
+    return match?.[1] ?? match?.[2] ?? match?.[3];
+  }
   return {
-    type: typeMatch?.[1] ?? 'code',
-    title: titleMatch?.[1] ?? 'Artifact',
-    language: langMatch?.[1],
+    type: getAttr('type') ?? 'code',
+    title: getAttr('title') ?? 'Artifact',
+    language: getAttr('language'),
   };
 }
 

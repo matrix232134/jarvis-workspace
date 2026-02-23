@@ -1,6 +1,6 @@
 import type WebSocket from 'ws';
 
-export type FrameType = 'auth' | 'chat' | 'chat.response' | 'device.command' | 'device.response' | 'device.list' | 'device.list.response' | 'device.subscribe' | 'device.change' | 'device.capability_change' | 'voice.session_start' | 'voice.session_end' | 'voice.speech_end' | 'voice.barge_in' | 'voice.transcript' | 'voice.playback_stop' | 'voice.speech_complete' | 'voice.proactive' | 'voice.display' | 'voice.artifact' | 'error' | 'ping' | 'pong';
+export type FrameType = 'auth' | 'chat' | 'chat.response' | 'chat.token' | 'chat.done' | 'device.command' | 'device.response' | 'device.list' | 'device.list.response' | 'device.subscribe' | 'device.change' | 'device.capability_change' | 'voice.session_start' | 'voice.session_end' | 'voice.speech_end' | 'voice.barge_in' | 'voice.transcript' | 'voice.playback_stop' | 'voice.speech_complete' | 'voice.proactive' | 'voice.display' | 'voice.artifact' | 'error' | 'ping' | 'pong';
 
 export interface VoiceSessionRecord {
   sessionId: string;

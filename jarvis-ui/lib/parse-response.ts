@@ -1,8 +1,8 @@
-import type { JarvisVoice, DisplayCard, ArtifactRef } from "@/components/jarvis/message-stream"
+import type { DisplayCard, ArtifactRef } from "@/lib/types"
 import { extractArtifacts, type ParsedArtifact } from "./parse-artifact"
 
 interface ParsedResponse {
-  voice?: JarvisVoice
+  voice?: { text: string }
   displays?: DisplayCard[]
   artifacts?: ArtifactRef[]
 }

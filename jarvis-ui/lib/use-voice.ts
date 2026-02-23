@@ -13,7 +13,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import type { BridgeFrame } from "./use-bridge"
-import type { Message } from "@/components/jarvis/message-stream"
+import type { Message } from "@/lib/types"
+import { parseJarvisResponse } from "./parse-response"
 
 // Binary frame header: [36-byte sessionId ASCII][1-byte direction][PCM audio]
 const AUDIO_HEADER_LENGTH = 37
@@ -297,15 +298,25 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
       }
       case "voice.speech_complete": {
         if (sessionId === sessionIdRef.current) {
-          // Add JARVIS response to chat if the voice service sent the text
+          // Parse the full LLM response to extract voice/display/artifact sections
           const responseText = frame.payload?.responseText as string | undefined
           if (responseText && onAddMessageRef.current) {
-            onAddMessageRef.current({
+            const parsed = parseJarvisResponse(responseText)
+            const jarvisMsg: Message = {
               type: "jarvis",
               id: crypto.randomUUID(),
               timestamp: makeTimestamp(),
-              voice: { text: responseText },
-            })
+              voice: parsed.voice,
+              displays: parsed.displays,
+              artifacts: parsed.artifacts,
+            }
+            onAddMessageRef.current(jarvisMsg)
+
+            // If artifacts were found, show the first one in the panel
+            if (parsed.artifacts && parsed.artifacts.length > 0 && onShowArtifactRef.current) {
+              const a = parsed.artifacts[0]
+              onShowArtifactRef.current(a)
+            }
           }
 
           if (textOnlySessionRef.current) {

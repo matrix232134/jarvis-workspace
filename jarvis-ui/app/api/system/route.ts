@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { readFileSync, readdirSync, existsSync } from "node:fs"
+import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { createConnection } from "node:net"
 
@@ -36,14 +37,16 @@ export async function GET() {
   const devicesJson = readJsonSafe(join(HOME, "jarvis-bridge", "devices.json"))
   const mcporterConfig = readJsonSafe(join(HOME, ".mcporter", "mcporter.json"))
 
-  // Count skills
+  // Count and list skills
   let skillCount = 0
+  let skillNames: string[] = []
   const skillsDir = join(HOME, ".openclaw", "workspace", "skills")
   try {
     if (existsSync(skillsDir)) {
-      skillCount = readdirSync(skillsDir, { withFileTypes: true })
+      const dirs = readdirSync(skillsDir, { withFileTypes: true })
         .filter((d) => d.isDirectory())
-        .length
+      skillCount = dirs.length
+      skillNames = dirs.map((d) => d.name).sort()
     }
   } catch { /* ignore */ }
 
@@ -103,12 +106,57 @@ export async function GET() {
     checkPort(19300),
   ])
 
-  // Parse devices
-  const devices: Array<{ name: string; id: string }> = []
+  // Get Tailscale devices (real network devices)
+  interface TailscaleDevice {
+    name: string
+    id: string
+    os: string
+    online: boolean
+    ip: string
+    isSelf: boolean
+  }
+  const tailscaleDevices: TailscaleDevice[] = []
+  let tailscaleOnline = false
+  try {
+    const raw = execSync("tailscale status --json", { timeout: 5000, encoding: "utf-8" })
+    const ts = JSON.parse(raw)
+    tailscaleOnline = ts.BackendState === "Running"
+
+    // Add self
+    if (ts.Self) {
+      tailscaleDevices.push({
+        name: ts.Self.HostName,
+        id: ts.Self.ID,
+        os: ts.Self.OS ?? "unknown",
+        online: ts.Self.Online === true,
+        ip: ts.Self.TailscaleIPs?.[0] ?? "",
+        isSelf: true,
+      })
+    }
+
+    // Add peers
+    if (ts.Peer && typeof ts.Peer === "object") {
+      for (const peer of Object.values(ts.Peer) as Array<Record<string, unknown>>) {
+        tailscaleDevices.push({
+          name: peer.HostName as string,
+          id: peer.ID as string,
+          os: (peer.OS as string) ?? "unknown",
+          online: peer.Online === true,
+          ip: (peer.TailscaleIPs as string[])?.[0] ?? "",
+          isSelf: false,
+        })
+      }
+    }
+  } catch { /* tailscale not available */ }
+
+  // Detect voice service from bridge devices
+  let voiceServiceRegistered = false
   if (Array.isArray(devicesJson)) {
     for (const d of devicesJson) {
-      if (d && typeof d === "object" && "name" in d && "id" in d) {
-        devices.push({ name: d.name as string, id: d.id as string })
+      if (d && typeof d === "object" && "name" in d) {
+        if ((d.name as string).toLowerCase().includes("voice")) {
+          voiceServiceRegistered = true
+        }
       }
     }
   }
@@ -125,14 +173,16 @@ export async function GET() {
     services: {
       gateway: gatewayUp,
       bridge: bridgeUp,
+      voiceService: voiceServiceRegistered,
       telegram: telegramEnabled,
-      tailscale: true, // installed and configured
-      tailscaleIp: "100.79.59.30",
+      tailscale: tailscaleOnline,
+      tailscaleIp: tailscaleDevices.find((d) => d.isSelf)?.ip ?? "",
     },
-    devices,
+    devices: tailscaleDevices,
     capabilities: {
       model: modelDisplay,
       skills: skillCount,
+      skillNames,
       mcp: mcpServerNames.length,
       mcpServers: mcpServerNames,
       heartbeat: heartbeatEvery,

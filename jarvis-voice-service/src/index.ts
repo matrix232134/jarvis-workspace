@@ -262,26 +262,33 @@ async function main(): Promise<void> {
   async function synthesizeText(sessionId: string, text: string): Promise<void> {
     try {
       const sentences = prepareForTTS(text);
-      for (const sentence of sentences) {
-        // Check phrase cache first
+
+      // Fire all TTS requests in parallel, collect audio in order
+      const audioPromises = sentences.map(async (sentence, index) => {
         const cached = phraseCache.get(sentence);
-        if (cached) {
-          bridge.sendAudio(sessionId, cached);
-          continue;
-        }
-        // Synthesize via Cartesia
-        await cartesia.synthesize(sentence, `${sessionId}-tts`, (chunk) => {
-          bridge.sendAudio(sessionId, chunk);
+        if (cached) return { index, audio: cached };
+
+        const chunks: Buffer[] = [];
+        await cartesia.synthesize(sentence, `${sessionId}-tts-${index}`, (chunk) => {
+          chunks.push(chunk);
         });
+        return { index, audio: Buffer.concat(chunks) };
+      });
+
+      const results = await Promise.all(audioPromises);
+
+      // Send audio in sentence order
+      results.sort((a, b) => a.index - b.index);
+      for (const result of results) {
+        bridge.sendAudio(sessionId, result.audio);
       }
-      // Signal speech complete after small buffer for last audio chunk
-      setTimeout(() => {
-        bridge.sendFrame({
-          type: 'voice.speech_complete',
-          id: '',
-          payload: { sessionId },
-        });
-      }, 200);
+
+      // Signal speech complete immediately (audio already sent)
+      bridge.sendFrame({
+        type: 'voice.speech_complete',
+        id: '',
+        payload: { sessionId },
+      });
     } catch (err) {
       logger.error(`voice: synthesizeText failed for session ${sessionId}: ${err}`);
       bridge.sendFrame({
@@ -389,14 +396,15 @@ async function main(): Promise<void> {
     const cached = phraseCache.get(text);
     if (cached) {
       bridge.sendAudio(proactiveSessionId, cached);
-      // Signal speech complete
+      // Signal speech complete after playback duration (no extra padding)
+      const playbackMs = (cached.length / 2 / 24000) * 1000;
       setTimeout(() => {
         bridge.sendFrame({
           type: 'voice.speech_complete',
           id: '',
           payload: { sessionId: proactiveSessionId },
         });
-      }, (cached.length / 2 / 24000) * 1000 + 200);
+      }, playbackMs);
       return;
     }
 
@@ -409,14 +417,12 @@ async function main(): Promise<void> {
       });
     }
 
-    // Signal speech complete after a small buffer
-    setTimeout(() => {
-      bridge.sendFrame({
-        type: 'voice.speech_complete',
-        id: '',
-        payload: { sessionId: proactiveSessionId },
-      });
-    }, 200);
+    // Signal speech complete immediately (audio already sent)
+    bridge.sendFrame({
+      type: 'voice.speech_complete',
+      id: '',
+      payload: { sessionId: proactiveSessionId },
+    });
   }
 
   // Expose proactive speech for external use (e.g., heartbeat alerts)

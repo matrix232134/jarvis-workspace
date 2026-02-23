@@ -53,6 +53,12 @@ export function startServer(config: BridgeConfig): void {
   });
 
   wss.on('connection', (ws) => {
+    // Disable Nagle's algorithm for low-latency small frames
+    const rawSocket = (ws as any)._socket;
+    if (rawSocket && typeof rawSocket.setNoDelay === 'function') {
+      rawSocket.setNoDelay(true);
+    }
+
     let deviceId: string | null = null;
     let alive = true;
 

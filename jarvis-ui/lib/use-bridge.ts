@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import type { Message } from "@/components/jarvis/message-stream"
+import type { Message, ArtifactRef } from "@/lib/types"
 import { parseJarvisResponse } from "./parse-response"
 
 interface UseBridgeOptions {
@@ -31,7 +31,7 @@ const STORAGE_KEY = "jarvis-bridge-credentials"
 const INITIAL_BACKOFF_MS = 500
 const MAX_BACKOFF_MS = 10_000
 const KEEPALIVE_INTERVAL_MS = 20_000
-const CHAT_TIMEOUT_MS = 120_000
+const CHAT_TIMEOUT_MS = 60_000 // Time to first token — streaming keeps it alive after that
 
 function loadCredentials(): { deviceId: string; token: string } | null {
   try {
@@ -47,6 +47,32 @@ function saveCredentials(deviceId: string, token: string): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ deviceId, token }))
 }
 
+function makeTimestamp(): string {
+  return new Date().toLocaleTimeString("en-AU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Australia/Adelaide",
+  })
+}
+
+/** Extract readable voice text from streaming content, stripping pillar tags and artifact blocks. */
+function extractVoicePreview(text: string): string {
+  // Strip complete artifact blocks
+  let cleaned = text.replace(/\[ARTIFACT\s*[^\]]*\][\s\S]*?\[\/ARTIFACT\]/gi, "")
+  // Strip partial (still streaming) artifact block
+  const partialArtifactIdx = cleaned.search(/\[ARTIFACT[\s\S]*$/i)
+  if (partialArtifactIdx >= 0) {
+    cleaned = cleaned.slice(0, partialArtifactIdx)
+  }
+  // Strip leading [VOICE] tag
+  cleaned = cleaned.replace(/^\[VOICE\]\s*/i, "")
+  // Truncate at [DISPLAY] or [ACTION] tags
+  const tagIdx = cleaned.search(/\[(DISPLAY|ACTION)/i)
+  if (tagIdx > 0) cleaned = cleaned.slice(0, tagIdx)
+  return cleaned.trim() || "..."
+}
+
 export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinaryFrame }: UseBridgeOptions) {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected")
   const [messages, setMessages] = useState<Message[]>([
@@ -56,6 +82,8 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
 
   const wsRef = useRef<WebSocket | null>(null)
   const pendingRef = useRef<Map<string, PendingResolver>>(new Map())
+  const streamingRef = useRef<Map<string, { text: string; msgId: string }>>(new Map())
+  const rafRef = useRef<number | null>(null)
   const backoffRef = useRef(INITIAL_BACKOFF_MS)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const keepaliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -185,6 +213,12 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
         case "chat.response":
           handleChatResponse(frame)
           break
+        case "chat.token":
+          handleChatToken(frame)
+          break
+        case "chat.done":
+          handleChatDone(frame)
+          break
         case "error":
           handleError(frame)
           break
@@ -234,12 +268,101 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
     }
   }
 
+  function handleChatToken(frame: BridgeFrame) {
+    const token = frame.payload.token as string
+    const stream = streamingRef.current.get(frame.id)
+
+    if (stream) {
+      // Accumulate token into ref (no re-render)
+      stream.text += token
+
+      // Schedule a batched UI update via requestAnimationFrame
+      if (!rafRef.current) {
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = null
+          // Single state update for all tokens received since last frame
+          const updates = new Map<string, string>()
+          for (const [, s] of streamingRef.current) {
+            updates.set(s.msgId, extractVoicePreview(s.text))
+          }
+          if (updates.size > 0) {
+            setMessages((prev) =>
+              prev.map((m) => {
+                const preview = updates.get(m.id)
+                return preview && m.type === "jarvis"
+                  ? { ...m, voice: { text: preview } }
+                  : m
+              })
+            )
+          }
+        })
+      }
+    } else {
+      // First token — create a streaming JARVIS message immediately
+      const msgId = crypto.randomUUID()
+      streamingRef.current.set(frame.id, { text: token, msgId })
+      const preview = extractVoicePreview(token)
+      const msg: Message = {
+        type: "jarvis",
+        id: msgId,
+        timestamp: makeTimestamp(),
+        voice: { text: preview },
+      }
+      setMessages((prev) => [...prev, msg])
+      setIsProcessing(false)
+    }
+  }
+
+  function handleChatDone(frame: BridgeFrame) {
+    const content = frame.payload.content as string
+    const stream = streamingRef.current.get(frame.id)
+    const parsed = parseJarvisResponse(content)
+
+    if (stream) {
+      // Replace streaming message with final parsed version
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === stream.msgId && m.type === "jarvis"
+            ? {
+                ...m,
+                voice: parsed.voice,
+                displays: parsed.displays,
+                artifacts: parsed.artifacts,
+              }
+            : m
+        )
+      )
+      streamingRef.current.delete(frame.id)
+    } else {
+      // Fallback: no streaming was active, add as new message
+      const jarvisMsg: Message = {
+        type: "jarvis",
+        id: crypto.randomUUID(),
+        timestamp: makeTimestamp(),
+        voice: parsed.voice,
+        displays: parsed.displays,
+        artifacts: parsed.artifacts,
+      }
+      setMessages((prev) => [...prev, jarvisMsg])
+    }
+
+    // Resolve the pending promise so sendChat can return
+    const resolver = pendingRef.current.get(frame.id)
+    if (resolver) {
+      pendingRef.current.delete(frame.id)
+      resolver.resolve(content)
+    }
+    setIsProcessing(false)
+  }
+
   function handleError(frame: BridgeFrame) {
     const resolver = pendingRef.current.get(frame.id)
     if (resolver) {
       pendingRef.current.delete(frame.id)
       resolver.reject(new Error(frame.payload.message as string))
     }
+    // Clean up any streaming state
+    streamingRef.current.delete(frame.id)
   }
 
   function scheduleReconnect() {
@@ -252,7 +375,7 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
     backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF_MS)
   }
 
-  const sendChat = useCallback(async (text: string): Promise<string | null> => {
+  const sendChat = useCallback(async (text: string): Promise<{ voiceText: string | null; artifacts?: ArtifactRef[] }> => {
     // Add user message immediately
     const userMsg: Message = {
       type: "user",
@@ -291,31 +414,26 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
           },
         }))
 
-        // Timeout
-        setTimeout(() => {
-          if (pendingRef.current.has(id)) {
+        // Timeout — only for time-to-first-token; streaming keeps alive after that
+        const timeoutId = setTimeout(() => {
+          if (pendingRef.current.has(id) && !streamingRef.current.has(id)) {
             pendingRef.current.delete(id)
-            reject(new Error("Response timed out (2m)"))
+            reject(new Error("No response from JARVIS"))
           }
         }, CHAT_TIMEOUT_MS)
+
+        // Clear timeout once streaming starts or completes
+        const checkStreaming = setInterval(() => {
+          if (!pendingRef.current.has(id)) {
+            clearTimeout(timeoutId)
+            clearInterval(checkStreaming)
+          }
+        }, 1000)
       })
 
-      // Parse and add JARVIS response
+      // Message already displayed by handleChatDone — just extract results
       const parsed = parseJarvisResponse(content)
-      const jarvisMsg: Message = {
-        type: "jarvis",
-        id: crypto.randomUUID(),
-        timestamp: new Date().toLocaleTimeString("en-AU", {
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-          timeZone: "Australia/Adelaide",
-        }),
-        voice: parsed.voice,
-        displays: parsed.displays,
-      }
-      setMessages((prev) => [...prev, jarvisMsg])
-      return parsed.voice?.text ?? null
+      return { voiceText: parsed.voice?.text ?? null, artifacts: parsed.artifacts }
     } catch (err) {
       const detail = err instanceof Error ? err.message : "Unknown error"
       const errorMsg: Message = {
@@ -330,7 +448,7 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
         voice: { text: `Request failed: ${detail}` },
       }
       setMessages((prev) => [...prev, errorMsg])
-      return null
+      return { voiceText: null }
     } finally {
       setIsProcessing(false)
     }

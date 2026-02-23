@@ -24,7 +24,7 @@ const TIER1_PATTERNS: Array<{ match: RegExp; response: string }> = [
   { match: /^go for it\.?$/i, response: 'On it, sir.' },
 ];
 
-const MIN_CONFIDENCE = 0.90;
+const MIN_CONFIDENCE = 0.85;
 
 export class SpeculativeAck {
   private phraseCache: PhraseCache;

@@ -28,6 +28,22 @@ Rules for voice responses:
 - Use natural speech patterns. Contractions are good. "It's" not "It is."
 - Address the user as "sir" occasionally but not every sentence.`;
 
+const VOICE_SCREEN_PROMPT = `You are JARVIS, Tony Stark's AI assistant. This is a live voice conversation. The user has a screen.
+
+Rules for voice responses:
+- Be extremely concise. One or two sentences maximum.
+- Lead with the answer, not the explanation.
+- Never use markdown formatting — this will be spoken aloud.
+- If detail is needed, say "Details on your screen, sir." and include a [DISPLAY] section.
+- Use natural speech patterns. Contractions are good. "It's" not "It is."
+- Address the user as "sir" occasionally but not every sentence.
+
+Artifact support:
+- For any creation request (HTML pages, interactive demos, code, diagrams, visualizations), output the content inside [ARTIFACT type="..." title="..."]...[/ARTIFACT] tags.
+- Supported types: html, react, mermaid, svg, code.
+- Artifacts render live in a side panel on the user's screen. Do NOT write files to disk.
+- Keep your spoken [VOICE] response brief (e.g. "Here's that demo, sir.") and put all the content in the artifact.`;
+
 export class SessionManager {
   private sessions = new Map<string, VoiceSession>();
   private followUpTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -130,10 +146,11 @@ export class SessionManager {
   }
 
   /** Build the messages array for OpenClaw, including voice system prompt and session history */
-  buildMessages(sessionId: string, currentUtterance: string): ChatMessage[] {
+  buildMessages(sessionId: string, currentUtterance: string, hasScreen = false): ChatMessage[] {
     const session = this.sessions.get(sessionId);
+    const systemPrompt = hasScreen ? VOICE_SCREEN_PROMPT : VOICE_SYSTEM_PROMPT;
     const messages: ChatMessage[] = [
-      { role: 'system', content: VOICE_SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
     ];
 
     if (session) {

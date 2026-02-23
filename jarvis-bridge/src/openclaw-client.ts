@@ -3,7 +3,7 @@ import * as logger from './logger.js';
 
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 500;
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -81,4 +81,83 @@ export async function chat(
   }
 
   throw lastError ?? new Error('Gateway request failed after retries');
+}
+
+/**
+ * Stream chat completion tokens from OpenClaw via SSE.
+ * Yields individual content tokens as they arrive.
+ */
+export async function* streamChat(
+  messages: ChatMessage[],
+  userId: string,
+  config: BridgeConfig
+): AsyncGenerator<string> {
+  const url = `${config.openclaw.url}/v1/chat/completions`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.openclaw.token}`,
+      },
+      body: JSON.stringify({
+        model: 'openclaw:main',
+        messages,
+        user: userId,
+        stream: true,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`OpenClaw HTTP ${res.status}: ${text}`);
+    }
+
+    if (!res.body) {
+      throw new Error('OpenClaw response has no body');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(':')) continue;
+
+        if (trimmed.startsWith('data: ')) {
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') return;
+
+          try {
+            const parsed = JSON.parse(data) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+            };
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) yield content;
+          } catch { /* skip malformed chunk */ }
+        }
+      }
+    }
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Gateway request timed out');
+    }
+    throw err;
+  }
 }

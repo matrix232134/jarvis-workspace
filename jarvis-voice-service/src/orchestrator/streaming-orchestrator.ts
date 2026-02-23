@@ -107,16 +107,39 @@ export class StreamingOrchestrator extends EventEmitter {
       }
 
       // 2. Build messages with session context
-      const messages = this.sessionManager.buildMessages(sessionId, utterance);
+      const messages = this.sessionManager.buildMessages(sessionId, utterance, hasScreen);
 
       // 3. Stream LLM tokens through delivery router + sentence detection + parallel TTS
       const sentenceDetector = new SentenceDetector();
-      const ttsPromises: Promise<void>[] = [];
       let sentenceIndex = 0;
+      let totalSentences = 0;
+      let completedSentences = 0;
+      let allSentencesQueued = false;
+      let speakingDoneFired = false;
       let fullResponse = '';
       let displayBuffer = '';
       let actionBuffer = '';
       const artifacts: Array<{ content: string; meta: ArtifactMeta }> = [];
+
+      // Fire speaking_done when the last TTS sentence completes (not when all promises resolve)
+      const onSentenceAudioDone = () => {
+        completedSentences++;
+        if (allSentencesQueued && completedSentences >= totalSentences && !speakingDoneFired) {
+          speakingDoneFired = true;
+          if (!abortController.signal.aborted) {
+            this.emit('speaking_done', { sessionId });
+            this.sessionManager.setState(sessionId, 'followup');
+          }
+        }
+      };
+
+      const enqueueSentence = (text: string) => {
+        const idx = sentenceIndex++;
+        totalSentences++;
+        this.synthesizeAndEmit(sessionId, text, idx, abortController.signal)
+          .then(onSentenceAudioDone)
+          .catch(onSentenceAudioDone);
+      };
 
       // Delivery router splits [VOICE]/[DISPLAY]/[ACTION]/[ARTIFACT] in real-time
       const deliveryRouter = new DeliveryRouter({
@@ -124,8 +147,7 @@ export class StreamingOrchestrator extends EventEmitter {
           const sentence = sentenceDetector.addToken(text);
           if (sentence) {
             const finalSentence = hasScreen ? sentence : rewriteForVoiceOnly(sentence);
-            const idx = sentenceIndex++;
-            ttsPromises.push(this.synthesizeAndEmit(sessionId, finalSentence, idx, abortController.signal));
+            enqueueSentence(finalSentence);
           }
         },
         onDisplay: (text) => { displayBuffer += text; },
@@ -147,14 +169,23 @@ export class StreamingOrchestrator extends EventEmitter {
         const remaining = sentenceDetector.flush();
         if (remaining) {
           const finalRemaining = hasScreen ? remaining : rewriteForVoiceOnly(remaining);
-          ttsPromises.push(this.synthesizeAndEmit(sessionId, finalRemaining, sentenceIndex, abortController.signal));
+          enqueueSentence(finalRemaining);
         }
       }
 
-      // 5. Wait for all TTS to complete
-      await Promise.allSettled(ttsPromises);
+      // Mark all sentences as queued so the completion tracker can fire
+      allSentencesQueued = true;
 
-      // 6. Emit display/action/artifact content
+      // If no sentences were produced (e.g. pure display/artifact response), fire immediately
+      if (totalSentences === 0 && !speakingDoneFired) {
+        speakingDoneFired = true;
+        if (!abortController.signal.aborted) {
+          this.emit('speaking_done', { sessionId });
+          this.sessionManager.setState(sessionId, 'followup');
+        }
+      }
+
+      // 5. Emit display/action/artifact content immediately (don't wait for TTS)
       if (!abortController.signal.aborted && displayBuffer.trim()) {
         this.emit('display', { sessionId, content: displayBuffer.trim() });
       }
@@ -167,16 +198,10 @@ export class StreamingOrchestrator extends EventEmitter {
         }
       }
 
-      // 7. Record the full response
+      // 6. Record the full response
       if (!abortController.signal.aborted && fullResponse) {
         this.sessionManager.addJarvisExchange(sessionId, fullResponse);
         this.fullResponses.set(sessionId, fullResponse);
-      }
-
-      // 8. Transition to follow-up state
-      if (!abortController.signal.aborted) {
-        this.emit('speaking_done', { sessionId });
-        this.sessionManager.setState(sessionId, 'followup');
       }
     } catch (err) {
       if (abortController.signal.aborted) {

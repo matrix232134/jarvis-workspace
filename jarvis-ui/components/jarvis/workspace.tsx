@@ -1,136 +1,231 @@
 "use client"
 
-import { useState, useCallback } from "react"
-import { JarvisSidebar } from "./sidebar"
-import { TopBar } from "./top-bar"
-import { MessageStream } from "./message-stream"
-import { InputBar } from "./input-bar"
-import { ArtifactPanel } from "./artifact-panel"
-import { useBridge } from "@/lib/use-bridge"
+import { useState, useCallback, useEffect, useMemo, useRef } from "react"
+import type { JarvisState, Message, DisplayCard, ArtifactRef, AttentionItem } from "@/lib/types"
+import { useBridge, type BridgeFrame } from "@/lib/use-bridge"
 import { useVoice } from "@/lib/use-voice"
 import { useArtifact } from "@/lib/use-artifact"
-import { cn } from "@/lib/utils"
+import { useSubAgents } from "@/lib/use-sub-agents"
+import { useSystemData } from "@/lib/use-system-data"
+import { mockOpenItems, mockTrustEntries } from "@/lib/mock-data"
+
+import Waveform from "./waveform"
+import Grain from "./grain"
+import ContextBar from "./context-bar"
+import InputBar from "./input-bar"
+import Stream from "./stream"
+import SubAgentRail from "./surfaces/sub-agent-rail"
+import OpenItemsStrip from "./surfaces/open-items"
+import TimeDivider from "./messages/time-divider"
+import Briefing from "./messages/briefing"
+import UserBubble from "./messages/user"
+import JarvisVoice from "./messages/jarvis"
+import ProactiveAlert from "./messages/proactive"
+import ThinkingIndicator from "./messages/thinking"
+import SystemDrawer from "./overlays/system-drawer"
+import ArtifactPanel from "./overlays/artifact-panel"
+import DisplayModal from "./overlays/display-modal"
+import AttentionBanners from "./overlays/attention"
 
 const BRIDGE_URL = process.env.NEXT_PUBLIC_BRIDGE_URL || "ws://127.0.0.1:19300"
-const BRIDGE_PAIRING_TOKEN = process.env.NEXT_PUBLIC_BRIDGE_PAIRING_TOKEN || "0f78c90c-c00a-4a17-ac9b-15e1b1f531b5"
-const PICOVOICE_ACCESS_KEY = process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || "9tMDzB9p86Vf/zXV4R82fwt1nGvrRzQJEmMZqgJ+bjC9JQx5TS5C+g=="
+const BRIDGE_PAIRING_TOKEN = process.env.NEXT_PUBLIC_BRIDGE_PAIRING_TOKEN || "jarvis-ui"
+const PICOVOICE_ACCESS_KEY = process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || ""
 
-export function JarvisWorkspace() {
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+export default function Workspace() {
+  // Artifact state
   const artifact = useArtifact()
 
+  // Real data hooks
+  const subAgents = useSubAgents()
+  const systemData = useSystemData()
+
+  // Intermediate refs for voice frame routing (solves circular dependency)
+  const voiceFrameRef = useRef<((frame: BridgeFrame) => void) | null>(null)
+  const binaryFrameRef = useRef<((data: ArrayBuffer) => void) | null>(null)
+
+  // Bridge connection — uses intermediate refs for voice frame routing
+  const bridge = useBridge({
+    url: BRIDGE_URL,
+    pairingToken: BRIDGE_PAIRING_TOKEN,
+    deviceName: "JARVIS Workspace",
+    onVoiceFrame: voiceFrameRef,
+    onBinaryFrame: binaryFrameRef,
+  })
+
+  // Voice pipeline — uses bridge's real sendFrame/sendBinary
   const voice = useVoice({
     accessKey: PICOVOICE_ACCESS_KEY,
     enabled: true,
-    sendFrame: (frame) => sendFrame(frame),
-    sendBinary: (data) => sendBinary(data),
-    onAddMessage: (msg) => addMessage(msg),
+    sendFrame: bridge.sendFrame,
+    sendBinary: bridge.sendBinary,
+    onAddMessage: bridge.addMessage,
     onShowArtifact: (a) => artifact.showArtifact(a),
   })
 
-  const { status, messages, isProcessing, sendChat, sendFrame, sendBinary, addMessage } = useBridge({
-    url: BRIDGE_URL,
-    pairingToken: BRIDGE_PAIRING_TOKEN,
-    deviceName: "jarvis-ui",
-    onVoiceFrame: voice.voiceFrameRef,
-    onBinaryFrame: voice.binaryFrameRef,
-  })
+  // Wire voice frame handlers into the intermediate refs
+  // useVoice exposes voiceFrameRef/binaryFrameRef with the actual handlers
+  voiceFrameRef.current = voice.voiceFrameRef.current
+  binaryFrameRef.current = voice.binaryFrameRef.current
 
-  // Send text and speak the response via voice pipeline
-  const handleSend = useCallback(async (text: string) => {
-    const voiceText = await sendChat(text)
-    if (voiceText) {
-      voice.speakResponse(voiceText)
-    }
-  }, [sendChat, voice.speakResponse])
+  // Derive jarvisState from bridge + voice status
+  const jarvisState: JarvisState = useMemo(() => {
+    if (bridge.status !== "connected") return "disconnected"
+    if (voice.voiceStatus === "streaming") return "listening"
+    if (voice.voiceStatus === "playing") return "speaking"
+    if (bridge.isProcessing) return "processing"
+    return "idle"
+  }, [bridge.status, voice.voiceStatus, bridge.isProcessing])
 
-  const statusLabel =
-    status === "connected" ? "Connected" :
-    status === "authenticating" ? "Authenticating" :
-    status === "connecting" ? "Connecting..." :
-    "Disconnected"
+  // Surface visibility
+  const [showAgentRail, setShowAgentRail] = useState(true)
+  const [showOpenItems, setShowOpenItems] = useState(true)
+  const [showSystemDrawer, setShowSystemDrawer] = useState(false)
 
-  const orbState: "idle" | "processing" | "disconnected" | "connecting" =
-    status === "connected" ? (isProcessing ? "processing" : "idle") :
-    status === "connecting" || status === "authenticating" ? "connecting" :
-    "disconnected"
+  // Overlay state
+  const [activeDisplay, setActiveDisplay] = useState<DisplayCard | null>(null)
+  const [attentionItems, setAttentionItems] = useState<AttentionItem[]>([])
 
-  // Map voice status to input bar voice status
-  const inputVoiceStatus =
-    voice.voiceStatus === "listening" || voice.voiceStatus === "streaming" ? "listening" as const :
-    voice.voiceStatus === "playing" ? "speaking" as const :
-    voice.voiceStatus === "ready" ? "ready" as const :
-    "unavailable" as const
+  // Panel offset for layout compression
+  const [windowWidth, setWindowWidth] = useState(0)
+  useEffect(() => {
+    setWindowWidth(window.innerWidth)
+    const handleResize = () => setWindowWidth(window.innerWidth)
+    window.addEventListener("resize", handleResize)
+    return () => window.removeEventListener("resize", handleResize)
+  }, [])
+  const panelOffset = artifact.panelOpen ? Math.min(windowWidth * 0.48, 620) : 0
 
-  const isVoiceActive = voice.voiceStatus === "listening" || voice.voiceStatus === "streaming" || voice.voiceStatus === "playing"
+  // Send text message through bridge + speak response
+  const handleSend = useCallback(
+    async (text: string) => {
+      const { voiceText, artifacts } = await bridge.sendChat(text)
+      if (voiceText) {
+        voice.speakResponse(voiceText)
+      }
+      if (artifacts && artifacts.length > 0) {
+        artifact.showArtifact(artifacts[0])
+      }
+    },
+    [bridge.sendChat, voice.speakResponse, artifact.showArtifact]
+  )
+
+  const handleOpenDisplay = useCallback((display: DisplayCard) => {
+    setActiveDisplay(display)
+  }, [])
+
+  const handleOpenArtifact = useCallback((ref: ArtifactRef) => {
+    artifact.showArtifact(ref)
+  }, [artifact.showArtifact])
+
+  const handleDismissAttention = useCallback((id: string) => {
+    setAttentionItems((prev) => prev.filter((a) => a.id !== id))
+  }, [])
+
+  const runningAgents = subAgents.agents.filter((a) => a.status === "running")
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-background">
-      {/* ====== Ambient background glow ====== */}
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-[60vh] animate-ambient-glow"
-        style={{
-          background:
-            "radial-gradient(ellipse 70% 55% at 50% 0%, oklch(0.62 0.18 250 / 0.1) 0%, transparent 65%)",
-        }}
-      />
-      <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-[25vh] animate-ambient-glow"
-        style={{
-          background:
-            "radial-gradient(ellipse 50% 60% at 50% 100%, oklch(0.62 0.18 250 / 0.04) 0%, transparent 70%)",
-          animationDelay: "4s",
-        }}
+    <div
+      className="relative flex flex-col h-screen overflow-hidden"
+      style={{ backgroundColor: "var(--bg)" }}
+    >
+      {/* Background layers */}
+      <Waveform state={jarvisState} />
+      <Grain />
+
+      {/* Attention banners */}
+      <AttentionBanners items={attentionItems} onDismiss={handleDismissAttention} />
+
+      {/* Context bar */}
+      <ContextBar
+        state={jarvisState}
+        agentCount={runningAgents.length}
+        onToggleAgents={() => setShowAgentRail((p) => !p)}
+        onOpenSystem={() => setShowSystemDrawer(true)}
       />
 
-      {/* ====== Sidebar ====== */}
-      <JarvisSidebar collapsed={!sidebarOpen} orbState={orbState} />
+      {/* Sub-agent rail */}
+      {showAgentRail && runningAgents.length > 0 && (
+        <SubAgentRail agents={subAgents.agents} />
+      )}
 
-      {/* ====== Main area ====== */}
-      <div
-        className={cn(
-          "flex flex-col h-full transition-all duration-300 ease-out",
-          sidebarOpen ? "ml-72" : "ml-0",
-          artifact.panelOpen ? "mr-[45vw]" : "mr-0",
+      {/* Conversation stream */}
+      <Stream panelOffset={panelOffset}>
+        {/* Open items strip */}
+        {showOpenItems && mockOpenItems.length > 0 && (
+          <OpenItemsStrip
+            items={mockOpenItems}
+            onDismiss={() => setShowOpenItems(false)}
+          />
         )}
-      >
-        <TopBar
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          isProcessing={isProcessing}
-          isVoiceActive={isVoiceActive}
-        />
 
-        <MessageStream
-          messages={messages}
-          isThinking={isProcessing}
-          onArtifactClick={(a) => artifact.showArtifact(a)}
-        />
+        {/* Messages */}
+        {bridge.messages.map((msg) => {
+          switch (msg.type) {
+            case "separator":
+              return <TimeDivider key={msg.id} message={msg} />
+            case "briefing":
+              return <Briefing key={msg.id} message={msg} />
+            case "user":
+              return <UserBubble key={msg.id} message={msg} />
+            case "jarvis":
+              return (
+                <JarvisVoice
+                  key={msg.id}
+                  message={msg}
+                  onOpenDisplay={handleOpenDisplay}
+                  onOpenArtifact={handleOpenArtifact}
+                />
+              )
+            case "proactive":
+              return <ProactiveAlert key={msg.id} message={msg} />
+            default:
+              return null
+          }
+        })}
 
-        <InputBar
-          onSend={handleSend}
-          onVoiceToggle={voice.toggleSession}
-          primaryDevice={statusLabel}
-          voiceStatus={inputVoiceStatus}
-          trustLevel="autonomous"
-          transcript={voice.transcript}
-          hasPorcupine={voice.hasPorcupine}
-        />
-      </div>
+        {/* Thinking indicator */}
+        {bridge.isProcessing && <ThinkingIndicator />}
+      </Stream>
 
-      {/* ====== Artifact Panel ====== */}
-      <ArtifactPanel
-        artifact={artifact.activeArtifact}
-        history={artifact.history}
-        open={artifact.panelOpen}
-        onClose={artifact.closePanel}
-        onSelectHistory={artifact.selectFromHistory}
+      {/* Input bar */}
+      <InputBar
+        state={jarvisState}
+        onSend={handleSend}
+        panelOffset={panelOffset}
+        onVoiceToggle={voice.toggleSession}
+        voiceReady={voice.voiceStatus !== "unavailable" && voice.voiceStatus !== "initializing"}
+        transcript={voice.transcript}
+        hasPorcupine={voice.hasPorcupine}
+        connectionStatus={bridge.status}
       />
 
-      {/* ====== Mobile sidebar overlay ====== */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-20 bg-background/60 backdrop-blur-sm md:hidden"
-          onClick={() => setSidebarOpen(false)}
+      {/* Overlays */}
+      {showSystemDrawer && (
+        <SystemDrawer
+          services={systemData.services}
+          devices={systemData.devices}
+          crons={systemData.crons}
+          trust={mockTrustEntries}
+          skills={systemData.skills}
+          model={systemData.model}
+          heartbeat={systemData.heartbeat}
+          onClose={() => setShowSystemDrawer(false)}
+        />
+      )}
+
+      {artifact.panelOpen && artifact.activeArtifact && (
+        <ArtifactPanel
+          artifact={artifact.activeArtifact}
+          history={artifact.history}
+          onSelectHistory={artifact.selectFromHistory}
+          onClose={artifact.closePanel}
+        />
+      )}
+
+      {activeDisplay && (
+        <DisplayModal
+          display={activeDisplay}
+          onClose={() => setActiveDisplay(null)}
         />
       )}
     </div>

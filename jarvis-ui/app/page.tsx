@@ -1,5 +1,5 @@
-import { JarvisWorkspace } from "@/components/jarvis/workspace"
+import Workspace from "@/components/jarvis/workspace"
 
-export default function Home() {
-  return <JarvisWorkspace />
+export default function Page() {
+  return <Workspace />
 }
