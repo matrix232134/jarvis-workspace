@@ -1,0 +1,557 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* JARVIS is dark-only — dark grey theme */
+  --background: oklch(0.18 0.008 260);
+  --foreground: oklch(0.95 0 0);
+  --card: oklch(0.22 0.006 260);
+  --card-foreground: oklch(0.95 0 0);
+  --popover: oklch(0.22 0.006 260);
+  --popover-foreground: oklch(0.95 0 0);
+  --primary: oklch(0.62 0.18 250);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.26 0.006 260);
+  --secondary-foreground: oklch(0.90 0 0);
+  --muted: oklch(0.26 0.006 260);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.62 0.18 250);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.33 0.006 260);
+  --input: oklch(0.25 0.008 260);
+  --ring: oklch(0.62 0.18 250);
+  --radius: 0.75rem;
+
+  /* JARVIS-specific tokens */
+  --jarvis-blue: oklch(0.62 0.18 250);
+  --jarvis-blue-bright: oklch(0.78 0.16 250);
+  --jarvis-green: oklch(0.72 0.19 155);
+  --jarvis-amber: oklch(0.75 0.15 70);
+  --jarvis-red: oklch(0.65 0.2 25);
+  --glass: oklch(0.24 0.006 260 / 0.60);
+  --glass-border: oklch(0.45 0.005 260 / 0.40);
+  --glass-border-high: oklch(0.55 0.005 260 / 0.45);
+  --glass-hover: oklch(0.30 0.006 260 / 0.60);
+
+  /* Sidebar */
+  --sidebar: oklch(0.16 0.006 260);
+  --sidebar-foreground: oklch(0.95 0 0);
+  --sidebar-primary: oklch(0.62 0.18 250);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.26 0.006 260);
+  --sidebar-accent-foreground: oklch(0.90 0 0);
+  --sidebar-border: oklch(0.33 0.006 260);
+  --sidebar-ring: oklch(0.62 0.18 250);
+
+  --chart-1: oklch(0.62 0.18 250);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback', monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-glass: var(--glass);
+  --color-glass-border: var(--glass-border);
+  --color-glass-border-high: var(--glass-border-high);
+  --color-glass-hover: var(--glass-hover);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ========================================
+   SCROLLBAR
+   ======================================== */
+
+@layer base {
+  ::-webkit-scrollbar {
+    width: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(0.38 0.005 260 / 0.50);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.50 0.005 260 / 0.65);
+  }
+}
+
+/* ========================================
+   ORB — The soul of JARVIS
+   ======================================== */
+
+@keyframes orb-breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+@keyframes orb-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 20px 4px oklch(0.62 0.18 250 / 0.35),
+      0 0 50px 10px oklch(0.62 0.18 250 / 0.15),
+      0 0 80px 20px oklch(0.62 0.18 250 / 0.05);
+  }
+  50% {
+    box-shadow:
+      0 0 30px 8px oklch(0.62 0.18 250 / 0.45),
+      0 0 65px 15px oklch(0.62 0.18 250 / 0.2),
+      0 0 100px 25px oklch(0.62 0.18 250 / 0.08);
+  }
+}
+
+.animate-orb-breathe {
+  animation: orb-breathe 5s ease-in-out infinite;
+}
+.animate-orb-breathe-fast {
+  animation: orb-breathe 2s ease-in-out infinite;
+}
+.animate-orb-breathe-medium {
+  animation: orb-breathe 3s ease-in-out infinite;
+}
+
+.animate-orb-glow {
+  animation: orb-glow 5s ease-in-out infinite;
+}
+.animate-orb-glow-fast {
+  animation: orb-glow 2s ease-in-out infinite;
+}
+
+/* ========================================
+   AMBIENT — Background presence
+   ======================================== */
+
+@keyframes ambient-glow {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-ambient-glow {
+  animation: ambient-glow 8s ease-in-out infinite;
+}
+
+/* ========================================
+   STATUS INDICATORS
+   ======================================== */
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 4px 1px oklch(0.72 0.19 155 / 0.4);
+  }
+  50% {
+    opacity: 0.5;
+    box-shadow: 0 0 8px 2px oklch(0.72 0.19 155 / 0.2);
+  }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 3s ease-in-out infinite;
+}
+
+@keyframes processing-glow {
+  0%, 100% {
+    opacity: 0.5;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.animate-processing {
+  animation: processing-glow 2.5s ease-in-out infinite;
+}
+
+@keyframes voice-bar {
+  0%, 100% {
+    height: 4px;
+  }
+  50% {
+    height: var(--bar-height, 16px);
+  }
+}
+
+/* ========================================
+   ENTRANCE ANIMATIONS
+   ======================================== */
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.4s ease-out forwards;
+}
+
+/* Staggered cascade for lists */
+.animate-stagger-in > * {
+  opacity: 0;
+  animation: stagger-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.animate-stagger-in > *:nth-child(1) { animation-delay: 0ms; }
+.animate-stagger-in > *:nth-child(2) { animation-delay: 80ms; }
+.animate-stagger-in > *:nth-child(3) { animation-delay: 160ms; }
+.animate-stagger-in > *:nth-child(4) { animation-delay: 240ms; }
+.animate-stagger-in > *:nth-child(5) { animation-delay: 320ms; }
+.animate-stagger-in > *:nth-child(6) { animation-delay: 400ms; }
+.animate-stagger-in > *:nth-child(7) { animation-delay: 480ms; }
+.animate-stagger-in > *:nth-child(8) { animation-delay: 560ms; }
+.animate-stagger-in > *:nth-child(9) { animation-delay: 640ms; }
+.animate-stagger-in > *:nth-child(10) { animation-delay: 720ms; }
+
+@keyframes stagger-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.97);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+/* ========================================
+   MESSAGE ANIMATIONS
+   ======================================== */
+
+/* Glass card reveal — slides + fades from left */
+@keyframes card-reveal {
+  from {
+    opacity: 0;
+    transform: translateX(-12px) translateY(6px) scale(0.96);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+.animate-card-reveal {
+  animation: card-reveal 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* User bubble pop-in from right */
+@keyframes bubble-pop-right {
+  0% {
+    opacity: 0;
+    transform: translateX(24px) scale(0.9);
+    filter: blur(4px);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(-3px) scale(1.01);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+.animate-bubble-pop-right {
+  animation: bubble-pop-right 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* JARVIS response slide-in from left */
+@keyframes slide-in-left {
+  0% {
+    opacity: 0;
+    transform: translateX(-24px) scale(0.95);
+    filter: blur(4px);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(2px) scale(1.005);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+.animate-slide-in-left {
+  animation: slide-in-left 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* ========================================
+   GLASS SURFACE EFFECTS
+   ======================================== */
+
+/* Shimmer sweep — light passing across glass */
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+.animate-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.animate-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(0.95 0 0 / 0.03) 45%,
+    oklch(0.95 0 0 / 0.06) 50%,
+    oklch(0.95 0 0 / 0.03) 55%,
+    transparent 100%
+  );
+  animation: shimmer-sweep 3s ease-in-out infinite;
+  animation-delay: 1s;
+  pointer-events: none;
+}
+
+/* Scan line — horizontal sweep down display cards */
+@keyframes scan-line {
+  0% { top: -2px; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: calc(100% + 2px); opacity: 0; }
+}
+.animate-scan-line {
+  position: relative;
+  overflow: hidden;
+}
+.animate-scan-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(0.62 0.18 250 / 0.3) 30%,
+    oklch(0.62 0.18 250 / 0.5) 50%,
+    oklch(0.62 0.18 250 / 0.3) 70%,
+    transparent 100%
+  );
+  animation: scan-line 4s ease-in-out infinite;
+  animation-delay: 0.5s;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ========================================
+   DISPLAY CARD EFFECTS
+   ======================================== */
+
+/* Metric counter pop */
+@keyframes metric-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.8) translateY(4px);
+  }
+  70% {
+    transform: scale(1.05) translateY(-1px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.animate-metric-pop {
+  animation: metric-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  opacity: 0;
+}
+
+/* Progress bar fill */
+@keyframes progress-fill {
+  from { width: 0%; }
+}
+.animate-progress-fill {
+  animation: progress-fill 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Action indicator slide-in */
+@keyframes action-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ========================================
+   INTERACTIVE GLOW EFFECTS
+   ======================================== */
+
+/* Border glow for primary/briefing cards */
+@keyframes border-glow {
+  0%, 100% {
+    border-color: oklch(0.62 0.18 250 / 0.15);
+    box-shadow: 0 0 0 0 oklch(0.62 0.18 250 / 0);
+  }
+  50% {
+    border-color: oklch(0.62 0.18 250 / 0.3);
+    box-shadow: 0 0 30px -4px oklch(0.62 0.18 250 / 0.1);
+  }
+}
+.animate-border-glow {
+  animation: border-glow 4s ease-in-out infinite;
+}
+
+/* Input focus glow ring */
+@keyframes glow-ring-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 16px -4px oklch(0.62 0.18 250 / 0.2),
+      0 0 0 1px oklch(0.62 0.18 250 / 0.15);
+  }
+  50% {
+    box-shadow:
+      0 0 32px -4px oklch(0.62 0.18 250 / 0.3),
+      0 0 0 1px oklch(0.62 0.18 250 / 0.3);
+  }
+}
+.animate-glow-ring {
+  animation: glow-ring-pulse 2.5s ease-in-out infinite;
+}
+
+/* Alert pulse for proactive warnings */
+@keyframes alert-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 oklch(0.75 0.15 70 / 0.15);
+  }
+  50% {
+    box-shadow: 0 0 24px 4px oklch(0.75 0.15 70 / 0.08);
+  }
+}
+.animate-alert-pulse {
+  animation: alert-pulse 2.5s ease-in-out infinite;
+}
+
+/* ========================================
+   SUB-AGENT PROGRESS
+   ======================================== */
+
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+.animate-progress-indeterminate {
+  animation: progress-indeterminate 1.8s ease-in-out infinite;
+}
+
+@keyframes subagent-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 oklch(0.62 0.18 250 / 0.4); }
+  50% { opacity: 0.8; box-shadow: 0 0 4px 2px oklch(0.62 0.18 250 / 0.15); }
+}
+
+.animate-subagent-pulse {
+  animation: subagent-pulse 2s ease-in-out infinite;
+}
+
+/* ========================================
+   TYPING INDICATOR
+   ======================================== */
+
+@keyframes typing-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.3;
+  }
+  40% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+/* ========================================
+   ARTIFACT PANEL
+   ======================================== */
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
