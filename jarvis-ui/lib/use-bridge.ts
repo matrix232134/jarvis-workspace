@@ -128,7 +128,12 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
   const sendFrame = useCallback((frame: BridgeFrame) => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
+      if (frame.type.startsWith("voice.")) {
+        console.log("Bridge: sending", frame.type, frame.payload?.sessionId ? (frame.payload.sessionId as string).slice(0, 8) : "")
+      }
       ws.send(JSON.stringify(frame))
+    } else {
+      console.warn("Bridge: frame dropped (ws not open):", frame.type, "readyState:", ws?.readyState)
     }
   }, [])
 

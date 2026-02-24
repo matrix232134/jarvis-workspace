@@ -67,22 +67,34 @@ export async function GET() {
     schedule: string
     lastStatus: string | null
     lastDurationMs: number | null
+    lastRunAtMs: number | null
     nextRunAtMs: number | null
     consecutiveErrors: number
+    message: string
+    model: string
+    deliveryMode: string
+    deliveryChannel: string
   }
   const cronJobs: CronJobInfo[] = []
   if (cronData && typeof cronData === "object" && Array.isArray((cronData as Record<string, unknown>).jobs)) {
     for (const job of (cronData as Record<string, unknown>).jobs as Array<Record<string, unknown>>) {
       const state = (job.state as Record<string, unknown>) ?? {}
       const schedule = (job.schedule as Record<string, unknown>) ?? {}
+      const payload = (job.payload as Record<string, unknown>) ?? {}
+      const delivery = (job.delivery as Record<string, unknown>) ?? {}
       cronJobs.push({
         name: job.name as string,
         enabled: job.enabled as boolean,
         schedule: schedule.expr as string,
         lastStatus: (state.lastStatus as string) ?? null,
         lastDurationMs: (state.lastDurationMs as number) ?? null,
+        lastRunAtMs: (state.lastRunAtMs as number) ?? null,
         nextRunAtMs: (state.nextRunAtMs as number) ?? null,
         consecutiveErrors: (state.consecutiveErrors as number) ?? 0,
+        message: (payload.message as string) ?? "",
+        model: (payload.model as string) ?? "",
+        deliveryMode: (delivery.mode as string) ?? "none",
+        deliveryChannel: (delivery.channel as string) ?? "",
       })
     }
   }

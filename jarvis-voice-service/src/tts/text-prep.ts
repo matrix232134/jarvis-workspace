@@ -82,11 +82,14 @@ export function stripMarkdown(text: string): string {
   return result.trim();
 }
 
+// Pre-compiled regex patterns (created once at module load, not per call)
+const ABBREV_PATTERNS = Object.entries(ABBREVIATIONS).map(
+  ([abbr, expansion]) => ({ regex: new RegExp(`\\b${abbr}\\b`, 'g'), expansion })
+);
+
 export function expandAbbreviations(text: string): string {
   let result = text;
-  // Replace whole-word uppercase abbreviations
-  for (const [abbr, expansion] of Object.entries(ABBREVIATIONS)) {
-    const regex = new RegExp(`\\b${abbr}\\b`, 'g');
+  for (const { regex, expansion } of ABBREV_PATTERNS) {
     result = result.replace(regex, expansion);
   }
   return result;

@@ -21,7 +21,7 @@ import { SessionManager } from './session-manager.js';
 import { SpeculativeAck } from './speculative-ack.js';
 import { CartesiaClient } from '../tts/cartesia-client.js';
 import { PhraseCache } from '../tts/phrase-cache.js';
-import { prepareForTTS } from '../tts/text-prep.js';
+import { prepareForTTS, stripMarkdown, expandAbbreviations } from '../tts/text-prep.js';
 import { SpeechPriority } from '../types.js';
 import type { OpenClawStreamClient } from '../openclaw/openclaw-stream-client.js';
 import type { SpeechPriorityQueue } from '../tts/priority-queue.js';
@@ -46,6 +46,13 @@ export class StreamingOrchestrator extends EventEmitter {
   // Active orchestration state per session
   private activeAbortControllers = new Map<string, AbortController>();
   private fullResponses = new Map<string, string>(); // sessionId → accumulated LLM text
+
+  // Ordered audio emission — ensures sentence N plays fully before sentence N+1
+  private playbackStates = new Map<string, {
+    currentSentence: number;
+    buffers: Map<number, Buffer[]>;
+    finalSeen: Set<number>;
+  }>();
 
   constructor(opts: {
     sessionManager: SessionManager;
@@ -89,6 +96,9 @@ export class StreamingOrchestrator extends EventEmitter {
     // Abort any previous orchestration for this session
     this.cancelSession(sessionId);
 
+    // Fresh playback state for this utterance
+    this.playbackStates.delete(sessionId);
+
     const abortController = new AbortController();
     this.activeAbortControllers.set(sessionId, abortController);
 
@@ -97,13 +107,13 @@ export class StreamingOrchestrator extends EventEmitter {
       const ackAudio = this.speculativeAck.check(utterance, confidence, session);
       if (ackAudio) {
         logger.log('orchestrator: speculative ack fired');
-        this.emit('audio', {
+        this.emitAudioOrdered({
           sessionId,
           audio: ackAudio,
           sentenceIndex: -1, // Special index for ack
           priority: SpeechPriority.RESPONSE,
           isFinal: true,
-        } satisfies AudioEmission);
+        });
       }
 
       // 2. Build messages with session context
@@ -141,11 +151,38 @@ export class StreamingOrchestrator extends EventEmitter {
           .catch(onSentenceAudioDone);
       };
 
+      // Delayed processing ack — if no voice audio is queued within 2s,
+      // play a cached filler so the user knows JARVIS is working on it.
+      // This covers long-generation requests (artifacts, complex responses).
+      const PROCESSING_ACK_PHRASES = [
+        'One moment, sir.',
+        'Working on it.',
+        'On it, sir.',
+      ];
+      let processingAckFired = false;
+      const processingAckTimer = !ackAudio ? setTimeout(() => {
+        if (abortController.signal.aborted || totalSentences > 0) return;
+        const phrase = PROCESSING_ACK_PHRASES[Math.floor(Math.random() * PROCESSING_ACK_PHRASES.length)];
+        const audio = this.phraseCache.get(phrase);
+        if (audio) {
+          processingAckFired = true;
+          logger.log(`orchestrator: processing ack → "${phrase}"`);
+          this.emitAudioOrdered({
+            sessionId,
+            audio,
+            sentenceIndex: -1,
+            priority: SpeechPriority.RESPONSE,
+            isFinal: true,
+          });
+        }
+      }, 2000) : null;
+
       // Delivery router splits [VOICE]/[DISPLAY]/[ACTION]/[ARTIFACT] in real-time
       const deliveryRouter = new DeliveryRouter({
         onVoice: (text) => {
           const sentence = sentenceDetector.addToken(text);
           if (sentence) {
+            if (processingAckTimer) clearTimeout(processingAckTimer);
             const finalSentence = hasScreen ? sentence : rewriteForVoiceOnly(sentence);
             enqueueSentence(finalSentence);
           }
@@ -162,6 +199,9 @@ export class StreamingOrchestrator extends EventEmitter {
         fullResponse += token;
         deliveryRouter.addToken(token);
       }
+
+      // Clean up the ack timer if it hasn't fired
+      if (processingAckTimer) clearTimeout(processingAckTimer);
 
       // 4. Flush delivery router and sentence detector
       if (!abortController.signal.aborted) {
@@ -212,13 +252,13 @@ export class StreamingOrchestrator extends EventEmitter {
         try {
           const errorAudio = this.phraseCache.get('Not certain about that, sir.');
           if (errorAudio) {
-            this.emit('audio', {
+            this.emitAudioOrdered({
               sessionId,
               audio: errorAudio,
               sentenceIndex: 0,
               priority: SpeechPriority.RESPONSE,
               isFinal: true,
-            } satisfies AudioEmission);
+            });
           }
         } catch { /* ignore */ }
         this.sessionManager.setState(sessionId, 'followup');
@@ -240,6 +280,7 @@ export class StreamingOrchestrator extends EventEmitter {
       controller.abort();
       this.activeAbortControllers.delete(sessionId);
     }
+    this.playbackStates.delete(sessionId);
     this.priorityQueue.clearSession(sessionId);
   }
 
@@ -260,6 +301,82 @@ export class StreamingOrchestrator extends EventEmitter {
     this.emit('barge_in', { sessionId, keyword });
   }
 
+  // --- Ordered audio emission ---
+
+  /**
+   * Emit audio in sentence order. TTS runs in parallel for low latency,
+   * but this method ensures sentence N's chunks are fully emitted before
+   * sentence N+1 starts playing. Without this, interleaved chunks from
+   * parallel TTS sound garbled/choppy.
+   */
+  private emitAudioOrdered(emission: AudioEmission): void {
+    // Speculative acks (index < 0) always emit immediately
+    if (emission.sentenceIndex < 0) {
+      this.emit('audio', emission);
+      return;
+    }
+
+    let state = this.playbackStates.get(emission.sessionId);
+    if (!state) {
+      state = { currentSentence: 0, buffers: new Map(), finalSeen: new Set() };
+      this.playbackStates.set(emission.sessionId, state);
+    }
+
+    const idx = emission.sentenceIndex;
+
+    if (idx === state.currentSentence) {
+      // Current sentence — emit chunks immediately for streaming playback
+      if (emission.audio.length > 0) {
+        this.emit('audio', emission);
+      }
+      if (emission.isFinal) {
+        state.finalSeen.add(idx);
+        this.advancePlayback(emission.sessionId, state);
+      }
+    } else if (idx > state.currentSentence) {
+      // Future sentence — buffer until current sentence finishes
+      if (!state.buffers.has(idx)) {
+        state.buffers.set(idx, []);
+      }
+      if (emission.audio.length > 0) {
+        state.buffers.get(idx)!.push(emission.audio);
+      }
+      if (emission.isFinal) {
+        state.finalSeen.add(idx);
+      }
+    }
+    // idx < currentSentence: stale chunk from cancelled sentence, ignore
+  }
+
+  /** Advance to the next sentence and flush any buffered chunks for it. */
+  private advancePlayback(sessionId: string, state: {
+    currentSentence: number;
+    buffers: Map<number, Buffer[]>;
+    finalSeen: Set<number>;
+  }): void {
+    state.currentSentence++;
+
+    const buffered = state.buffers.get(state.currentSentence);
+    if (buffered) {
+      // Flush all buffered chunks for this sentence
+      for (const chunk of buffered) {
+        this.emit('audio', {
+          sessionId,
+          audio: chunk,
+          sentenceIndex: state.currentSentence,
+          priority: SpeechPriority.RESPONSE,
+          isFinal: false,
+        } satisfies AudioEmission);
+      }
+      state.buffers.delete(state.currentSentence);
+
+      // If this sentence already completed while buffered, advance again
+      if (state.finalSeen.has(state.currentSentence)) {
+        this.advancePlayback(sessionId, state);
+      }
+    }
+  }
+
   // --- private ---
 
   private async synthesizeAndEmit(
@@ -270,22 +387,22 @@ export class StreamingOrchestrator extends EventEmitter {
   ): Promise<void> {
     if (signal.aborted) return;
 
-    // Prepare text for TTS
-    const sentences = prepareForTTS(text);
-    const prepared = sentences.join(' ');
+    // Prepare text for TTS — sentence is already split by SentenceDetector,
+    // so skip redundant splitSentences; just clean markdown + expand abbreviations
+    const prepared = expandAbbreviations(stripMarkdown(text)).trim();
     if (!prepared) return;
 
     // Check phrase cache first
     const cached = this.phraseCache.get(prepared);
     if (cached) {
       if (!signal.aborted) {
-        this.emit('audio', {
+        this.emitAudioOrdered({
           sessionId,
           audio: cached,
           sentenceIndex: index,
           priority: SpeechPriority.RESPONSE,
           isFinal: true,
-        } satisfies AudioEmission);
+        });
       }
       return;
     }
@@ -298,25 +415,25 @@ export class StreamingOrchestrator extends EventEmitter {
         contextId,
         (chunk) => {
           if (!signal.aborted) {
-            this.emit('audio', {
+            this.emitAudioOrdered({
               sessionId,
               audio: chunk,
               sentenceIndex: index,
               priority: SpeechPriority.RESPONSE,
               isFinal: false,
-            } satisfies AudioEmission);
+            });
           }
         },
       );
       // Emit a final marker for this sentence
       if (!signal.aborted) {
-        this.emit('audio', {
+        this.emitAudioOrdered({
           sessionId,
           audio: Buffer.alloc(0),
           sentenceIndex: index,
           priority: SpeechPriority.RESPONSE,
           isFinal: true,
-        } satisfies AudioEmission);
+        });
       }
     } catch (err) {
       if (!signal.aborted) {

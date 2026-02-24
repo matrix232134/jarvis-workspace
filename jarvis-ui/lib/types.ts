@@ -120,6 +120,14 @@ export interface CronJob {
   name: string
   next: string
   ok: boolean | null
+  schedule: string
+  enabled: boolean
+  message: string
+  model: string
+  delivery: string
+  lastRunAt: string
+  lastDuration: string
+  consecutiveErrors: number
 }
 
 export interface TrustEntry {

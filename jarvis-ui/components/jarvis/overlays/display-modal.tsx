@@ -34,7 +34,7 @@ export default function DisplayModal({
       className="fixed inset-0 flex items-center justify-center"
       style={{
         zIndex: 70,
-        backgroundColor: "rgba(250,250,249,0.88)",
+        backgroundColor: "var(--overlay-bg)",
         backdropFilter: "blur(30px)",
         animation: "j-fade-in 0.2s cubic-bezier(0.4,0,0.2,1)",
       }}

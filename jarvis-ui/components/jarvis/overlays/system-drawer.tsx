@@ -55,7 +55,7 @@ export default function SystemDrawer({
       className="fixed inset-0"
       style={{
         zIndex: 60,
-        backgroundColor: "rgba(250,250,249,0.75)",
+        backgroundColor: "var(--overlay-bg)",
         backdropFilter: "blur(20px)",
         animation: "j-fade-in 0.2s cubic-bezier(0.4,0,0.2,1)",
       }}
@@ -297,14 +297,14 @@ function SectionLabel({ label, detail }: { label: string; detail?: string }) {
         style={{
           fontSize: 9,
           fontWeight: 700,
-          color: "rgba(29,78,216,0.25)",
+          color: "var(--section-label)",
           letterSpacing: "0.16em",
         }}
       >
         {label}
       </span>
       {detail && (
-        <span className="font-mono" style={{ fontSize: 9, color: "rgba(29,78,216,0.2)" }}>
+        <span className="font-mono" style={{ fontSize: 9, color: "var(--section-detail)" }}>
           {detail}
         </span>
       )}

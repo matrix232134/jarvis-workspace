@@ -30,8 +30,13 @@ interface ApiSystemResponse {
     schedule: string
     lastStatus: string | null
     lastDurationMs: number | null
+    lastRunAtMs: number | null
     nextRunAtMs: number | null
     consecutiveErrors: number
+    message: string
+    model: string
+    deliveryMode: string
+    deliveryChannel: string
   }>
 }
 
@@ -73,6 +78,36 @@ function mapDevices(api: ApiSystemResponse["devices"]): Device[] {
   }))
 }
 
+function formatTimeAgo(ms: number): string {
+  const diff = Date.now() - ms
+  if (diff < 0) return "just now"
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+  if (days > 0) return `${days}d ago`
+  if (hours > 0) return `${hours}h ago`
+  if (minutes > 0) return `${minutes}m ago`
+  return "just now"
+}
+
+function formatDuration(ms: number | null): string {
+  if (!ms) return "\u2014"
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`
+}
+
+function formatModelShort(model: string): string {
+  if (!model) return "\u2014"
+  return model
+    .replace("anthropic/", "")
+    .replace("claude-", "Claude ")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (c: string) => c.toUpperCase())
+}
+
 function mapCrons(api: ApiSystemResponse["cronJobs"]): CronJob[] {
   return api
     .filter((c) => c.enabled)
@@ -80,6 +115,14 @@ function mapCrons(api: ApiSystemResponse["cronJobs"]): CronJob[] {
       name: c.name,
       next: formatRelativeTime(c.nextRunAtMs),
       ok: c.consecutiveErrors > 0 ? false : c.lastStatus === "ok" ? true : null,
+      schedule: c.schedule,
+      enabled: c.enabled,
+      message: c.message || "",
+      model: formatModelShort(c.model),
+      delivery: c.deliveryMode === "none" ? "none" : `${c.deliveryMode} \u2192 ${c.deliveryChannel}`,
+      lastRunAt: c.lastRunAtMs ? formatTimeAgo(c.lastRunAtMs) : "\u2014",
+      lastDuration: formatDuration(c.lastDurationMs),
+      consecutiveErrors: c.consecutiveErrors,
     }))
 }
 

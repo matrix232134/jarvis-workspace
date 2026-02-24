@@ -1,11 +1,11 @@
 import type { JarvisState } from "@/lib/types"
 
 const DOT_COLORS: Record<JarvisState, string> = {
-  idle: "#1D4ED8",
-  processing: "#3B6CF4",
-  listening: "#047857",
-  speaking: "#7C3AED",
-  disconnected: "#D4D4D0",
+  idle: "var(--accent)",
+  processing: "var(--accent-light)",
+  listening: "var(--j-green)",
+  speaking: "var(--j-purple)",
+  disconnected: "var(--ink-ghost)",
 }
 
 export default function Presence({

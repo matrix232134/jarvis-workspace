@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import type { JarvisState } from "@/lib/types"
+import type { AudioLevels } from "@/lib/use-audio-reactive"
 
 interface WaveConfig {
   count: number
@@ -12,10 +13,10 @@ interface WaveConfig {
 }
 
 const WAVE_CONFIG: Record<JarvisState, WaveConfig> = {
-  idle: { count: 2, amplitude: 8, speed: 0.005, alpha: 0.045, lineWidth: 1.2 },
-  processing: { count: 4, amplitude: 20, speed: 0.014, alpha: 0.07, lineWidth: 1.2 },
-  listening: { count: 5, amplitude: 40, speed: 0.02, alpha: 0.085, lineWidth: 1.5 },
-  speaking: { count: 6, amplitude: 55, speed: 0.025, alpha: 0.1, lineWidth: 1.5 },
+  idle: { count: 3, amplitude: 12, speed: 0.005, alpha: 0.12, lineWidth: 1.5 },
+  processing: { count: 5, amplitude: 28, speed: 0.014, alpha: 0.18, lineWidth: 1.5 },
+  listening: { count: 6, amplitude: 50, speed: 0.02, alpha: 0.22, lineWidth: 2.0 },
+  speaking: { count: 7, amplitude: 65, speed: 0.025, alpha: 0.28, lineWidth: 2.0 },
   disconnected: { count: 0, amplitude: 0, speed: 0, alpha: 0, lineWidth: 0 },
 }
 
@@ -23,17 +24,36 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
 }
 
-export default function Waveform({ state }: { state: JarvisState }) {
+export default function Waveform({ state, audioLevels }: { state: JarvisState; audioLevels?: AudioLevels }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const timeRef = useRef(0)
   const frameRef = useRef<number>(0)
   const currentRef = useRef<WaveConfig>({ ...WAVE_CONFIG[state] })
   const targetRef = useRef<WaveConfig>({ ...WAVE_CONFIG[state] })
+  const audioRef = useRef<AudioLevels | undefined>(audioLevels)
+
+  // Keep audio levels ref in sync
+  useEffect(() => {
+    audioRef.current = audioLevels
+  }, [audioLevels])
 
   // Update target when state changes — draw loop interpolates smoothly
+  // When audio reactive, modulate the target based on audio levels
   useEffect(() => {
-    targetRef.current = { ...WAVE_CONFIG[state] }
-  }, [state])
+    const base = { ...WAVE_CONFIG[state] }
+    const audio = audioRef.current
+
+    if (audio && audio.volume > 0.01) {
+      // Audio-reactive modulation — bass drives amplitude, volume drives alpha
+      base.amplitude = Math.max(base.amplitude, 15 + audio.bass * 120)
+      base.alpha = Math.max(base.alpha, 0.08 + audio.volume * 0.5)
+      base.lineWidth = Math.max(base.lineWidth, 1.2 + audio.volume * 1.5)
+      base.speed = Math.max(base.speed, 0.005 + audio.mid * 0.03)
+      base.count = Math.max(base.count, 3 + Math.floor(audio.treble * 5))
+    }
+
+    targetRef.current = base
+  }, [state, audioLevels])
 
   // Canvas setup + draw loop — runs once on mount
   useEffect(() => {
@@ -116,7 +136,7 @@ export default function Waveform({ state }: { state: JarvisState }) {
       ctx.globalCompositeOperation = "lighter"
       const glowCount = Math.min(waveCount, 3)
       for (let wi = 0; wi < glowCount; wi++) {
-        const glowAlpha = current.alpha * 0.25 * Math.pow(0.7, wi)
+        const glowAlpha = current.alpha * 0.4 * Math.pow(0.7, wi)
         const phaseOffset = wi * 0.8
         const freqMod = 1 + wi * 0.3
 
@@ -129,7 +149,7 @@ export default function Waveform({ state }: { state: JarvisState }) {
 
         ctx.beginPath()
         ctx.strokeStyle = gGrad
-        ctx.lineWidth = current.lineWidth + 4
+        ctx.lineWidth = current.lineWidth + 6
         ctx.lineCap = "round"
         ctx.lineJoin = "round"
 

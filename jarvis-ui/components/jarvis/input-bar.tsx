@@ -13,6 +13,8 @@ export default function InputBar({
   transcript,
   hasPorcupine,
   connectionStatus,
+  prefill,
+  onPrefillConsumed,
 }: {
   state: JarvisState
   onSend: (text: string) => void
@@ -22,6 +24,8 @@ export default function InputBar({
   transcript?: string
   hasPorcupine?: boolean
   connectionStatus?: ConnectionStatus
+  prefill?: string | null
+  onPrefillConsumed?: () => void
 }) {
   const [text, setText] = useState("")
   const [focused, setFocused] = useState(false)
@@ -37,6 +41,16 @@ export default function InputBar({
       inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 120) + "px"
     }
   }, [text])
+
+  // Prefill text from Library "Discuss" action
+  useEffect(() => {
+    if (prefill) {
+      setText(prefill)
+      onPrefillConsumed?.()
+      // Focus the input after prefill
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
+  }, [prefill, onPrefillConsumed])
 
   const handleSend = () => {
     if (!hasText) return
@@ -86,7 +100,7 @@ export default function InputBar({
       style={{
         right: panelOffset,
         zIndex: 40,
-        background: "linear-gradient(to top, var(--bg) 65%, rgba(250,250,249,0.6) 85%, transparent)",
+        background: "linear-gradient(to top, var(--bg) 65%, var(--fade-bg) 85%, transparent)",
         paddingTop: 32,
         transition: "right 0.4s cubic-bezier(0.22,1,0.36,1)",
       }}
@@ -194,7 +208,7 @@ export default function InputBar({
               height: 36,
               borderRadius: 10,
               backgroundColor: hasText ? "var(--accent)" : "var(--surface-active)",
-              color: hasText ? "#FFFFFF" : "var(--ink-ghost)",
+              color: hasText ? "var(--btn-active-text)" : "var(--ink-ghost)",
               border: "none",
               transform: hasText ? "scale(1)" : "scale(0.92)",
               boxShadow: hasText ? "0 2px 8px rgba(29,78,216,0.2)" : "none",

@@ -5,6 +5,8 @@ import type { JarvisState, Message, DisplayCard, ArtifactRef, AttentionItem } fr
 import { useBridge, type BridgeFrame } from "@/lib/use-bridge"
 import { useVoice } from "@/lib/use-voice"
 import { useArtifact } from "@/lib/use-artifact"
+import { useTheme } from "@/lib/use-theme"
+import { useAudioReactive } from "@/lib/use-audio-reactive"
 import { useSubAgents } from "@/lib/use-sub-agents"
 import { useSystemData } from "@/lib/use-system-data"
 import { mockOpenItems, mockTrustEntries } from "@/lib/mock-data"
@@ -23,6 +25,7 @@ import JarvisVoice from "./messages/jarvis"
 import ProactiveAlert from "./messages/proactive"
 import ThinkingIndicator from "./messages/thinking"
 import SystemDrawer from "./overlays/system-drawer"
+import LibraryDrawer from "./overlays/library-drawer"
 import ArtifactPanel from "./overlays/artifact-panel"
 import DisplayModal from "./overlays/display-modal"
 import AttentionBanners from "./overlays/attention"
@@ -32,6 +35,12 @@ const BRIDGE_PAIRING_TOKEN = process.env.NEXT_PUBLIC_BRIDGE_PAIRING_TOKEN || "ja
 const PICOVOICE_ACCESS_KEY = process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || ""
 
 export default function Workspace() {
+  // Theme
+  const { isDark, toggleTheme } = useTheme()
+
+  // Audio reactive waveform
+  const audioReactive = useAudioReactive()
+
   // Artifact state
   const artifact = useArtifact()
 
@@ -80,10 +89,12 @@ export default function Workspace() {
   const [showAgentRail, setShowAgentRail] = useState(true)
   const [showOpenItems, setShowOpenItems] = useState(true)
   const [showSystemDrawer, setShowSystemDrawer] = useState(false)
+  const [showLibraryDrawer, setShowLibraryDrawer] = useState(false)
 
   // Overlay state
   const [activeDisplay, setActiveDisplay] = useState<DisplayCard | null>(null)
   const [attentionItems, setAttentionItems] = useState<AttentionItem[]>([])
+  const [inputPrefill, setInputPrefill] = useState<string | null>(null)
 
   // Panel offset for layout compression
   const [windowWidth, setWindowWidth] = useState(0)
@@ -103,10 +114,13 @@ export default function Workspace() {
         voice.speakResponse(voiceText)
       }
       if (artifacts && artifacts.length > 0) {
+        // Persist ALL artifacts to library — guaranteed capture
+        artifact.saveAllToLibrary(artifacts)
+        // Open the first one in the panel
         artifact.showArtifact(artifacts[0])
       }
     },
-    [bridge.sendChat, voice.speakResponse, artifact.showArtifact]
+    [bridge.sendChat, voice.speakResponse, artifact.showArtifact, artifact.saveAllToLibrary]
   )
 
   const handleOpenDisplay = useCallback((display: DisplayCard) => {
@@ -121,6 +135,31 @@ export default function Workspace() {
     setAttentionItems((prev) => prev.filter((a) => a.id !== id))
   }, [])
 
+  // Library drawer handlers
+  const handleOpenLibrary = useCallback(() => {
+    setShowLibraryDrawer(true)
+    setShowSystemDrawer(false) // Close system if open
+  }, [])
+
+  const handleLibraryOpen = useCallback((item: import("@/lib/use-artifact").Artifact) => {
+    artifact.showArtifact(item)
+    setShowLibraryDrawer(false)
+  }, [artifact.showArtifact])
+
+  const handleLibraryDiscuss = useCallback((item: import("@/lib/use-artifact").Artifact) => {
+    setInputPrefill(`About "${item.title}": `)
+    setShowLibraryDrawer(false)
+  }, [])
+
+  const handleAutomationDiscuss = useCallback((cron: import("@/lib/types").CronJob) => {
+    setInputPrefill(`About "${cron.name}" automation: `)
+    setShowLibraryDrawer(false)
+  }, [])
+
+  const handlePrefillConsumed = useCallback(() => {
+    setInputPrefill(null)
+  }, [])
+
   const runningAgents = subAgents.agents.filter((a) => a.status === "running")
 
   return (
@@ -129,8 +168,8 @@ export default function Workspace() {
       style={{ backgroundColor: "var(--bg)" }}
     >
       {/* Background layers */}
-      <Waveform state={jarvisState} />
-      <Grain />
+      <Waveform state={jarvisState} audioLevels={audioReactive.active ? audioReactive.levels : undefined} />
+      <Grain isDark={isDark} />
 
       {/* Attention banners */}
       <AttentionBanners items={attentionItems} onDismiss={handleDismissAttention} />
@@ -140,7 +179,12 @@ export default function Workspace() {
         state={jarvisState}
         agentCount={runningAgents.length}
         onToggleAgents={() => setShowAgentRail((p) => !p)}
-        onOpenSystem={() => setShowSystemDrawer(true)}
+        onOpenLibrary={handleOpenLibrary}
+        onOpenSystem={() => { setShowSystemDrawer(true); setShowLibraryDrawer(false) }}
+        isDark={isDark}
+        onToggleTheme={toggleTheme}
+        audioReactive={audioReactive.active}
+        onToggleAudio={audioReactive.toggle}
       />
 
       {/* Sub-agent rail */}
@@ -197,9 +241,22 @@ export default function Workspace() {
         transcript={voice.transcript}
         hasPorcupine={voice.hasPorcupine}
         connectionStatus={bridge.status}
+        prefill={inputPrefill}
+        onPrefillConsumed={handlePrefillConsumed}
       />
 
       {/* Overlays */}
+      {showLibraryDrawer && (
+        <LibraryDrawer
+          items={artifact.libraryItems}
+          crons={systemData.crons}
+          onOpen={handleLibraryOpen}
+          onDiscuss={handleLibraryDiscuss}
+          onDiscussAutomation={handleAutomationDiscuss}
+          onClose={() => setShowLibraryDrawer(false)}
+        />
+      )}
+
       {showSystemDrawer && (
         <SystemDrawer
           services={systemData.services}

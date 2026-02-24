@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react"
 
-export default function Grain() {
+export default function Grain({ isDark }: { isDark?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function Grain() {
       className="fixed inset-0 pointer-events-none"
       style={{
         zIndex: 999,
-        mixBlendMode: "multiply",
+        mixBlendMode: isDark ? "screen" : "multiply",
         opacity: 0.35,
         backgroundRepeat: "repeat",
         backgroundSize: "200px 200px",

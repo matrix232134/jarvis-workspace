@@ -9,7 +9,7 @@ export default memo(function UserBubble({ message }: { message: UserMessage }) {
         style={{
           maxWidth: "68%",
           backgroundColor: "var(--accent)",
-          color: "#FFFFFF",
+          color: "var(--btn-active-text)",
           borderRadius: "20px 20px 6px 20px",
           padding: "12px 18px",
           fontSize: 15,

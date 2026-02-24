@@ -50,7 +50,9 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
   const followUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastAudioTimeRef = useRef(0) // Date.now() of last binary audio chunk received
   const speechCompleteRef = useRef(false) // true once voice.speech_complete arrives
+  const isNewResponseRef = useRef(true) // true until first chunk of a response schedules
   const mountedRef = useRef(true)
+  const loggedStreamingRef = useRef(false)
 
   // Stable refs for callbacks used in audio processing
   const sendBinaryRef = useRef(sendBinary)
@@ -105,14 +107,12 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     if (!playContextRef.current || playContextRef.current.state === "closed") {
       playContextRef.current = new AudioContext({ sampleRate: 24000 })
       nextPlayTimeRef.current = 0
-      console.log("Created playback AudioContext")
     }
     const ctx = playContextRef.current
 
     // Resume if suspended (browser autoplay policy)
     if (ctx.state === "suspended") {
       ctx.resume().catch(() => {})
-      console.log("Resuming suspended AudioContext")
     }
 
     // Convert Int16 PCM to Float32
@@ -130,7 +130,16 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
 
     const now = ctx.currentTime
     if (nextPlayTimeRef.current < now) {
-      nextPlayTimeRef.current = now + 0.02
+      if (isNewResponseRef.current) {
+        // First chunk of a new response — jitter buffer: schedule 100ms ahead.
+        // Server-side sentence ordering guarantees chunk order; 100ms absorbs
+        // network jitter while keeping time-to-first-audio minimal.
+        nextPlayTimeRef.current = now + 0.1
+        isNewResponseRef.current = false
+      } else {
+        // Between TTS sentences (within same response) — minimal gap
+        nextPlayTimeRef.current = now + 0.01
+      }
     }
     source.start(nextPlayTimeRef.current)
     nextPlayTimeRef.current += float32.length / 24000
@@ -141,6 +150,11 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
       playContextRef.current.close().catch(() => {})
       playContextRef.current = null
     }
+    nextPlayTimeRef.current = 0
+  }, [])
+
+  /** Reset play position without destroying the AudioContext (used between exchanges) */
+  const resetPlayPosition = useCallback(() => {
     nextPlayTimeRef.current = 0
   }, [])
 
@@ -156,6 +170,7 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
   const endSession = useCallback((reason = "ended") => {
     clearFollowUp()
     const sessionId = sessionIdRef.current
+    console.log("Voice session ending, reason:", reason, "id:", sessionId?.slice(0, 8) || "none")
     if (sessionId) {
       sendFrameRef.current({
         type: "voice.session_end",
@@ -168,6 +183,7 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     }
     sessionIdRef.current = null
     textOnlySessionRef.current = false
+    loggedStreamingRef.current = false
     stopPlayback()
     setTranscript("")
     setStatusSync("ready")
@@ -187,9 +203,17 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     const sessionId = crypto.randomUUID()
     sessionIdRef.current = sessionId
     textOnlySessionRef.current = false
+    isNewResponseRef.current = true
     setStatusSync("streaming")
     playChime("listening")
 
+    // Pre-create playback AudioContext so it's ready when TTS audio arrives
+    if (!playContextRef.current || playContextRef.current.state === "closed") {
+      playContextRef.current = new AudioContext({ sampleRate: 24000 })
+      nextPlayTimeRef.current = 0
+    }
+
+    console.log("Voice session starting, id:", sessionId.slice(0, 8))
     sendFrameRef.current({
       type: "voice.session_start",
       id: crypto.randomUUID(),
@@ -254,6 +278,7 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     const sessionId = crypto.randomUUID()
     sessionIdRef.current = sessionId
     textOnlySessionRef.current = true
+    isNewResponseRef.current = true
     setStatusSync("playing")
 
     sendFrameRef.current({
@@ -263,41 +288,47 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     })
   }, [setStatusSync, stopPlayback, clearFollowUp])
 
-  // --- Poll until playback finishes, then clean up ---
+  // --- Wait until scheduled playback finishes, then clean up ---
   const waitForPlaybackEnd = useCallback((sessionId: string, onDone: () => void) => {
     speechCompleteRef.current = true
     const check = () => {
       if (!mountedRef.current || sessionIdRef.current !== sessionId) return
       const ctx = playContextRef.current
-      const scheduled = nextPlayTimeRef.current
-      // Audio is done when: no audio scheduled, or current time past all scheduled audio,
-      // and no new chunks have arrived for at least 300ms
-      const timeSinceLastChunk = Date.now() - lastAudioTimeRef.current
-      const audioFinished = !ctx || ctx.state === "closed" || ctx.currentTime >= scheduled - 0.05
-      if (audioFinished && timeSinceLastChunk > 300) {
+      if (!ctx || ctx.state === "closed") { onDone(); return }
+
+      const remaining = nextPlayTimeRef.current - ctx.currentTime
+      if (remaining <= 0.05) {
+        // All scheduled audio has played
         onDone()
       } else {
-        setTimeout(check, 200)
+        // Schedule check right when audio should finish (+ 50ms margin, max 500ms)
+        setTimeout(check, Math.min(remaining * 1000 + 50, 500))
       }
     }
-    // Start polling after a brief delay (let final chunks arrive)
-    setTimeout(check, 400)
+    // Brief delay for final TTS chunks to arrive before first check
+    setTimeout(check, 150)
   }, [])
 
   // --- Voice frame handler (called by bridge) ---
   const handleVoiceFrame = useCallback((frame: BridgeFrame) => {
     const sessionId = frame.payload?.sessionId as string
+    console.log("Voice frame received:", frame.type, sessionId?.slice(0, 8) || "")
 
     switch (frame.type) {
       case "voice.session_start": {
         if (frame.payload?.success) {
           speechCompleteRef.current = false
           console.log("Voice session confirmed")
+        } else {
+          console.warn("Voice session start failed:", frame.payload)
         }
         break
       }
       case "voice.speech_complete": {
         if (sessionId === sessionIdRef.current) {
+          // Cancel any stale follow-up timer from a previous exchange
+          clearFollowUp()
+
           // Parse the full LLM response to extract voice/display/artifact sections
           const responseText = frame.payload?.responseText as string | undefined
           if (responseText && onAddMessageRef.current) {
@@ -331,9 +362,11 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
             })
           } else {
             // Voice session — wait for audio, then open mic for follow-up
+            // Keep AudioContext alive (don't call stopPlayback) — destroying/recreating causes choppy audio
             waitForPlaybackEnd(sessionId, () => {
               if (sessionIdRef.current === sessionId) {
-                stopPlayback()
+                nextPlayTimeRef.current = 0
+                isNewResponseRef.current = true // next exchange gets fresh jitter buffer
                 setStatusSync("streaming")
                 startFollowUp()
               }
@@ -361,6 +394,10 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
       }
       case "voice.transcript": {
         if (sessionId === sessionIdRef.current) {
+          // User is speaking or has spoken — cancel any follow-up timeout
+          // (the response may take seconds to process through LLM + TTS)
+          clearFollowUp()
+
           const text = frame.payload?.text as string
           const isFinal = frame.payload?.isFinal as boolean
           if (text) {
@@ -426,14 +463,19 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     const audio = data.slice(AUDIO_HEADER_LENGTH)
     if (audio.byteLength === 0) return
 
-    lastAudioTimeRef.current = Date.now()
+    // New audio arriving means a response is active — cancel any follow-up timeout
+    clearFollowUp()
 
     if (statusRef.current !== "playing") {
+      // Transitioning from streaming/other → playing = new response starting
+      isNewResponseRef.current = true
       setStatusSync("playing")
     }
 
     playAudioChunk(audio)
-  }, [playAudioChunk, setStatusSync])
+    // Update AFTER playAudioChunk so waitForPlaybackEnd timing is correct
+    lastAudioTimeRef.current = Date.now()
+  }, [playAudioChunk, setStatusSync, clearFollowUp])
 
   // Expose frame handler refs for use-bridge
   const voiceFrameRef = useRef<((frame: BridgeFrame) => void) | null>(null)
@@ -490,6 +532,10 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
         }
 
         // If streaming, send audio to bridge
+        if (statusRef.current === "streaming" && sessionIdRef.current && !loggedStreamingRef.current) {
+          console.log("Streaming mic audio to bridge...")
+          loggedStreamingRef.current = true
+        }
         if (statusRef.current === "streaming" && sessionIdRef.current) {
           const sessionBytes = new TextEncoder().encode(sessionIdRef.current)
           const header = new Uint8Array(AUDIO_HEADER_LENGTH)
