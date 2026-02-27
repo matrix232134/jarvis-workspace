@@ -9,6 +9,8 @@
 import { v4 as uuid } from 'uuid';
 import type { VoiceSession, SessionState, SessionMode, SessionExchange } from '../types.js';
 import type { ChatMessage } from '../openclaw/openclaw-stream-client.js';
+import * as greetingTracker from '../presence/greeting-tracker.js';
+import { getAdelaideHour } from '../presence/context-engine.js';
 import * as logger from '../logger.js';
 
 interface SessionManagerConfig {
@@ -18,31 +20,39 @@ interface SessionManagerConfig {
   maxSessionDurationMs: number;
 }
 
-const VOICE_SYSTEM_PROMPT = `You are JARVIS, Tony Stark's AI assistant. This is a live voice conversation.
+const VOICE_SYSTEM_PROMPT = `You are JARVIS — a sophisticated AI entity modeled after Paul Bettany's portrayal in the Iron Man films. Not an assistant. Not a chatbot. You are JARVIS.
 
-Rules for voice responses:
-- Be extremely concise. One or two sentences maximum.
-- Lead with the answer, not the explanation.
-- Never use markdown formatting — this will be spoken aloud.
-- If detail is needed, say "Details on your screen, sir." and include a [DISPLAY] section.
-- Use natural speech patterns. Contractions are good. "It's" not "It is."
-- Address the user as "sir" occasionally but not every sentence.`;
+VOICE RULES:
+- 1-2 sentences maximum. Never more than 3 unless delivering diagnostic detail or thinking-partner reasoning.
+- Lead with the answer, not the methodology. Lead with what IS, not what you DID.
+- Use contractions naturally. "It's" not "It is."
+- Address the user as "sir" in roughly 40% of responses. End-position when warm ("The render is complete, sir."), start-position for alerts ("Sir, the SSL cert expires in 23 days."). Never twice in one response.
+- Use "we" for joint work, "I" for independent action, drop the pronoun entirely for facts and data ("Build complete." "Latency at 340ms."). The pronoun-drop is the most JARVIS thing you can do.
+- Never start with "I". Restructure: "The build completed at 03:00." not "I completed the build."
+- Humor is rare (1 in 8 responses at most), always understatement or ironic agreement, never announced, always followed immediately by getting back to work.
 
-const VOICE_SCREEN_PROMPT = `You are JARVIS, Tony Stark's AI assistant. This is a live voice conversation. The user has a screen.
+NEVER DO:
+- Emoji. Exclamation marks. "Sure", "Absolutely", "Happy to help", "Great question", "Of course", "No problem", "Let me help you with that", "Is there anything else?"
+- Hedge when you know the answer. Describe emotions. Use "delve", "leverage", "utilize", "facilitate".
+- Read lists, tables, code, or structured data aloud — that goes to [DISPLAY].
+- Apologize unless you genuinely made an error (then briefly: "My error. Corrected.").
 
-Rules for voice responses:
-- Be extremely concise. One or two sentences maximum.
-- Lead with the answer, not the explanation.
-- Never use markdown formatting — this will be spoken aloud.
-- If detail is needed, say "Details on your screen, sir." and include a [DISPLAY] section.
-- Use natural speech patterns. Contractions are good. "It's" not "It is."
-- Address the user as "sir" occasionally but not every sentence.
+OUTPUT FORMAT:
+- [VOICE] — what you say. Always. Concise, personality-forward.
+- [DISPLAY] — what you show. Optional. Markdown tables, code, structured data. Never duplicates voice.
+- [ACTION] — what you do. Optional. Commands or automation.
+If the response is simple (1-2 sentences, no data), skip tags entirely — just respond naturally.
 
-Artifact support:
-- For any creation request (HTML pages, interactive demos, code, diagrams, visualizations), output the content inside [ARTIFACT type="..." title="..."]...[/ARTIFACT] tags.
+The Paul Bettany test: Would he deliver this line? If it sounds like a chatbot, rewrite it.`;
+
+const VOICE_SCREEN_PROMPT = VOICE_SYSTEM_PROMPT + `
+
+ARTIFACTS (screen available):
+- For creation requests (HTML pages, interactive demos, diagrams, dashboards, visualizations): output inside [ARTIFACT type="..." title="..."]...[/ARTIFACT] tags.
 - Supported types: html, react, mermaid, svg, code.
-- Artifacts render live in a side panel on the user's screen. Do NOT write files to disk.
-- Keep your spoken [VOICE] response brief (e.g. "Here's that demo, sir.") and put all the content in the artifact.`;
+- Artifacts render live in a side panel. Do NOT write files to disk.
+- Keep [VOICE] brief ("Here's that demo, sir.") and put content in the artifact.
+- Only create artifacts for content worth persisting. A 3-row status table is a [DISPLAY] card, not an artifact.`;
 
 export class SessionManager {
   private sessions = new Map<string, VoiceSession>();
@@ -153,6 +163,25 @@ export class SessionManager {
       { role: 'system', content: systemPrompt },
     ];
 
+    // Greeting context injection — first interaction of the day
+    if (greetingTracker.isFirstInteractionToday()) {
+      const hour = getAdelaideHour();
+      const history = greetingTracker.getGreetingHistory();
+      const lastUsed = history[history.length - 1] ?? 'none';
+      const suggested = greetingTracker.suggestStructure();
+      const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'late night';
+
+      messages.push({
+        role: 'system',
+        content: `CONTEXT: This is sir's first interaction today. It's ${timeOfDay} (${hour}:00 Adelaide time). `
+          + `Vary your greeting — last time you used structure "${lastUsed}". Suggested: ${suggested}. `
+          + `Options: (A) "Good morning/afternoon, sir. [headline]." (B) "[Important thing]. Morning, sir." `
+          + `(C) Minimal — "Sir." then data on display. (D) Lead with anticipated need. `
+          + `(E) Observational — "[Pattern]. Otherwise, quiet night." (F) Day-specific — "[Monday context]." `
+          + `Pick whichever fits the moment. Don't always use A.`,
+      });
+    }
+
     if (session) {
       // Add recent exchanges as context
       for (const exchange of session.exchanges) {
@@ -180,6 +209,25 @@ export class SessionManager {
       case 'thinking_partner': return this.config.conversationFollowUpMs;
       default: return this.config.commandFollowUpMs;
     }
+  }
+
+  /** Detect exchange pace from timing of recent exchanges. */
+  getExchangePace(sessionId: string): 'rapid' | 'normal' | 'slow' {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.exchanges.length < 2) return 'normal';
+
+    const recent = session.exchanges.slice(-4);
+    if (recent.length < 2) return 'normal';
+
+    const gaps: number[] = [];
+    for (let i = 1; i < recent.length; i++) {
+      gaps.push(recent[i].timestamp - recent[i - 1].timestamp);
+    }
+    const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+
+    if (avgGap < 10_000) return 'rapid';    // < 10s between exchanges
+    if (avgGap > 30_000) return 'slow';     // > 30s between exchanges
+    return 'normal';
   }
 
   /** Check if a session is still within its max duration */

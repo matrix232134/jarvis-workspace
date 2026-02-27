@@ -20,6 +20,7 @@ Determine sir's current state from channel activity:
 - Check memory/ for open items or pending tasks from recent conversations
 - Run system-health checks if available (CPU, memory, disk, gateway)
 - Check for approaching scheduled events, cert expiry, deadlines
+- **If Google Workspace MCP is available**: query `calendar_get_events` for the next 2 hours. Flag upcoming meetings as Tier 2 if within 30 minutes, Tier 3 if within 2 hours. Also query `gmail_query_emails` with `is:unread` to count unread emails — flag Tier 2 if any are from important/known contacts, Tier 3 otherwise.
 - Review standing orders due for execution (see Standing Orders in MEMORY.md)
 - Check any connected monitoring (Langfuse costs, Uptime-Kuma alerts)
 

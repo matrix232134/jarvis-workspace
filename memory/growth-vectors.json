@@ -1,0 +1,35 @@
+{
+  "vectors": [],
+  "candidates": [
+    {
+      "id": "gv-auto-1771744550965",
+      "detected": "2026-02-22T07:15:50.965Z",
+      "type": "user_correction",
+      "description": "- They told you: \"Conversation info (untrusted metadata):\n```json\n{\n  \"message_id\": \"19\",\n  \"sender\"",
+      "entropy_source": "user_correction",
+      "priority": "medium",
+      "integration_hypothesis": "Verify before asserting: - They told you: \"Conversation info (untrusted metadata):\n```json\n{\n  \"message_id\": \"19\",\n  \"sender\"",
+      "weight": 0.5,
+      "source": "auto",
+      "validation_status": "candidate"
+    },
+    {
+      "id": "gv-auto-1771746996492",
+      "detected": "2026-02-22T07:56:36.492Z",
+      "type": "user_correction",
+      "description": "- They told you: \"```json\n{\n  \"message_id\": \"19\",\n  \"sender\": \"8327148909\"\n}\n```\n\njarvis\"\n  You said",
+      "entropy_source": "user_correction",
+      "priority": "medium",
+      "integration_hypothesis": "Verify before asserting: - They told you: \"```json\n{\n  \"message_id\": \"19\",\n  \"sender\": \"8327148909\"\n}\n```\n\njarvis\"\n  You said",
+      "weight": 0.5,
+      "source": "auto",
+      "validation_status": "candidate"
+    }
+  ],
+  "queue": {
+    "high": [],
+    "medium": [],
+    "low": []
+  },
+  "metadata": {}
+}

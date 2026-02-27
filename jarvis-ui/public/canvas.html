@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>JARVIS Canvas</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: rgba(0,0,0,0.03);
+    --border: rgba(0,0,0,0.08);
+    --ink: rgba(0,0,0,0.85);
+    --ink-faint: rgba(0,0,0,0.4);
+    --accent: #1d4ed8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0a0a;
+      --surface: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.08);
+      --ink: rgba(255,255,255,0.85);
+      --ink-faint: rgba(255,255,255,0.4);
+      --accent: #3b82f6;
+    }
+  }
+  html.light {
+    --bg: #fafaf9;
+    --surface: rgba(0,0,0,0.03);
+    --border: rgba(0,0,0,0.08);
+    --ink: rgba(0,0,0,0.85);
+    --ink-faint: rgba(0,0,0,0.4);
+    --accent: #1d4ed8;
+  }
+  html.dark {
+    --bg: #0a0a0a;
+    --surface: rgba(255,255,255,0.04);
+    --border: rgba(255,255,255,0.08);
+    --ink: rgba(255,255,255,0.85);
+    --ink-faint: rgba(255,255,255,0.4);
+    --accent: #3b82f6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body {
+    height: 100%; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', sans-serif;
+    overflow: hidden; transition: background 0.3s, color 0.3s;
+  }
+  .canvas-root {
+    height: 100%; display: flex; flex-direction: column;
+    padding: 16px;
+  }
+  .content { flex: 1; overflow-y: auto; overflow-x: hidden; }
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 100%;
+    color: var(--ink-faint); text-align: center; gap: 10px;
+  }
+  .empty-state .icon { font-size: 28px; opacity: 0.25; }
+  .empty-state .text { font-size: 12px; line-height: 1.6; max-width: 240px; }
+  .a2ui-frame {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 10px;
+    animation: fadeIn 0.3s ease;
+  }
+  .a2ui-frame p { margin: 0 0 8px 0; }
+  .a2ui-frame p:last-child { margin-bottom: 0; }
+  .a2ui-frame h4 { margin: 0 0 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); }
+  .a2ui-frame table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .a2ui-frame th, .a2ui-frame td { text-align: left; padding: 4px 8px; border-bottom: 0.5px solid var(--border); }
+  .a2ui-frame th { font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); }
+  .a2ui-frame code { font-family: 'SF Mono', Monaco, monospace; font-size: 11px; background: var(--surface); padding: 1px 4px; border-radius: 3px; }
+  .a2ui-frame pre { background: var(--surface); padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 11px; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+<div class="canvas-root">
+  <div class="content" id="content">
+    <div class="empty-state" id="empty">
+      <div class="icon">&#9671;</div>
+      <div class="text">
+        JARVIS pushes live content here — data, tables, status updates, and anything visual from the conversation.
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const content = document.getElementById('content');
+  const empty = document.getElementById('empty');
+
+  window.addEventListener('message', (e) => {
+    try {
+      const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+      if (data.type === 'theme') {
+        document.documentElement.className = data.dark ? 'dark' : 'light';
+      }
+      if (data.type === 'a2ui.push') {
+        addFrame(data.html || data.text || '');
+      }
+      if (data.type === 'a2ui.reset') {
+        resetCanvas();
+      }
+    } catch {}
+  });
+
+  function addFrame(htmlOrText) {
+    if (empty) empty.style.display = 'none';
+    const div = document.createElement('div');
+    div.className = 'a2ui-frame';
+    div.innerHTML = htmlOrText;
+    content.appendChild(div);
+    content.scrollTop = content.scrollHeight;
+  }
+
+  function resetCanvas() {
+    content.querySelectorAll('.a2ui-frame').forEach(f => f.remove());
+    if (empty) empty.style.display = '';
+  }
+})();
+</script>

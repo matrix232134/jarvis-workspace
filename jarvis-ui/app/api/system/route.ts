@@ -161,11 +161,22 @@ export async function GET() {
     }
   } catch { /* tailscale not available */ }
 
-  // Detect voice service from bridge devices
+  // Parse bridge devices
+  interface BridgeDeviceInfo {
+    id: string
+    name: string
+    createdAt: string
+  }
+  const bridgeDevices: BridgeDeviceInfo[] = []
   let voiceServiceRegistered = false
   if (Array.isArray(devicesJson)) {
     for (const d of devicesJson) {
       if (d && typeof d === "object" && "name" in d) {
+        bridgeDevices.push({
+          id: (d as Record<string, unknown>).id as string,
+          name: (d as Record<string, unknown>).name as string,
+          createdAt: (d as Record<string, unknown>).createdAt as string,
+        })
         if ((d.name as string).toLowerCase().includes("voice")) {
           voiceServiceRegistered = true
         }
@@ -191,6 +202,7 @@ export async function GET() {
       tailscaleIp: tailscaleDevices.find((d) => d.isSelf)?.ip ?? "",
     },
     devices: tailscaleDevices,
+    bridgeDevices,
     capabilities: {
       model: modelDisplay,
       skills: skillCount,

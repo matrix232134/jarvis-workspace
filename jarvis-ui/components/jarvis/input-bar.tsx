@@ -11,7 +11,7 @@ export default function InputBar({
   onVoiceToggle,
   voiceReady,
   transcript,
-  hasPorcupine,
+  hasWakeWord,
   connectionStatus,
   prefill,
   onPrefillConsumed,
@@ -22,7 +22,7 @@ export default function InputBar({
   onVoiceToggle?: () => void
   voiceReady?: boolean
   transcript?: string
-  hasPorcupine?: boolean
+  hasWakeWord?: boolean
   connectionStatus?: ConnectionStatus
   prefill?: string | null
   onPrefillConsumed?: () => void
@@ -79,7 +79,7 @@ export default function InputBar({
     if (!voiceReady) return "Voice unavailable"
     if (isListening) return "Listening"
     if (isSpeaking) return "Speaking"
-    if (hasPorcupine) return 'Say "JARVIS"'
+    if (hasWakeWord) return 'Say "Hey JARVIS"'
     return "Voice ready"
   })()
 

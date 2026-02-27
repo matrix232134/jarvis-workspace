@@ -10,7 +10,8 @@ steps:
     command: git -C "$WORKSPACE" diff --cached --stat
 
   - id: commit
-    command: git -C "$WORKSPACE" commit -m "Auto-backup $(date +%Y-%m-%d)"
+    command: >-
+      powershell.exe -NoProfile -Command "git -C '$env:WORKSPACE' commit -m ('Auto-backup ' + (Get-Date -Format 'yyyy-MM-dd'))"
     condition: $check.stdout
 
   - id: push

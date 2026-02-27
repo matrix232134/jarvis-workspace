@@ -12,11 +12,12 @@ async function sleep(ms: number): Promise<void> {
 export async function chat(
   messages: ChatMessage[],
   userId: string,
-  config: BridgeConfig
+  config: BridgeConfig,
+  model = 'openclaw:main'
 ): Promise<string> {
   const url = `${config.openclaw.url}/v1/chat/completions`;
   const body = JSON.stringify({
-    model: 'openclaw:main',
+    model,
     messages,
     user: userId,
   });
@@ -90,7 +91,8 @@ export async function chat(
 export async function* streamChat(
   messages: ChatMessage[],
   userId: string,
-  config: BridgeConfig
+  config: BridgeConfig,
+  model = 'openclaw:main'
 ): AsyncGenerator<string> {
   const url = `${config.openclaw.url}/v1/chat/completions`;
   const controller = new AbortController();
@@ -104,7 +106,7 @@ export async function* streamChat(
         Authorization: `Bearer ${config.openclaw.token}`,
       },
       body: JSON.stringify({
-        model: 'openclaw:main',
+        model,
         messages,
         user: userId,
         stream: true,

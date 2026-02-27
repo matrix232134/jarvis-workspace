@@ -70,10 +70,19 @@ Include a brief summary of what the skill does, not the full content. Sir can as
 
 ### Step 5: Activate
 On approval:
-1. Save SKILL.md to `skills/[name]/SKILL.md`
-2. Commit to workspace git
-3. Test on the next natural occurrence (don't force a test)
-4. Log activation in MEMORY.md
+1. Save SKILL.md to `skills/[name]/SKILL.md` — use the Claude Code MCP (`mcp.claude-code.Write`) to write the file directly
+2. Validate the skill file was written correctly using `mcp.claude-code.Read`
+3. Commit to workspace git using `mcp.claude-code.Bash` (`git -C workspace add -A && git commit -m "..."`)
+4. Test on the next natural occurrence (don't force a test)
+5. Log activation in MEMORY.md
+
+**Claude Code MCP Tools Available:**
+- `mcp.claude-code.Write` — create/overwrite skill files
+- `mcp.claude-code.Read` — read existing skills for pattern reference
+- `mcp.claude-code.Edit` — modify existing skill files (targeted string replacement)
+- `mcp.claude-code.Grep` — search across skills for patterns and conventions
+- `mcp.claude-code.Glob` — find skill files by pattern (`skills/**/SKILL.md`)
+- `mcp.claude-code.Bash` — run git commands, validation scripts
 
 ### Step 6: Record
 Update the Capability Gaps table:

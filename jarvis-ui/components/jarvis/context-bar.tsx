@@ -8,21 +8,23 @@ export default function ContextBar({
   agentCount,
   onToggleAgents,
   onOpenLibrary,
-  onOpenSystem,
   isDark,
   onToggleTheme,
   audioReactive,
   onToggleAudio,
+  onToggleCanvas,
+  showCanvas,
 }: {
   state: JarvisState
   agentCount: number
   onToggleAgents: () => void
   onOpenLibrary: () => void
-  onOpenSystem: () => void
   isDark: boolean
   onToggleTheme: () => void
   audioReactive?: boolean
   onToggleAudio?: () => void
+  onToggleCanvas?: () => void
+  showCanvas?: boolean
 }) {
   return (
     <div
@@ -193,23 +195,25 @@ export default function ContextBar({
           )}
         </button>
 
-        <button
-          onClick={onOpenSystem}
-          className="font-sans cursor-pointer"
-          style={{
-            fontSize: 11,
-            fontWeight: 500,
-            color: "var(--ink-faint)",
-            background: "none",
-            border: "none",
-            padding: "4px 0",
-            transition: "color 0.25s cubic-bezier(0.4,0,0.2,1)",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--ink-tertiary)")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--ink-faint)")}
-        >
-          System
-        </button>
+        {onToggleCanvas && (
+          <button
+            onClick={onToggleCanvas}
+            className="font-sans cursor-pointer"
+            style={{
+              fontSize: 11,
+              fontWeight: 500,
+              color: showCanvas ? "var(--accent)" : "var(--ink-faint)",
+              background: "none",
+              border: "none",
+              padding: "4px 0",
+              transition: "color 0.25s cubic-bezier(0.4,0,0.2,1)",
+            }}
+            onMouseEnter={(e) => { if (!showCanvas) e.currentTarget.style.color = "var(--ink-tertiary)" }}
+            onMouseLeave={(e) => { if (!showCanvas) e.currentTarget.style.color = "var(--ink-faint)" }}
+          >
+            Canvas
+          </button>
+        )}
       </div>
     </div>
   )

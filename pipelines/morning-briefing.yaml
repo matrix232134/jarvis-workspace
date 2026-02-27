@@ -1,23 +1,39 @@
 name: morning-briefing
-# requires: [shell:powershell, tool:llm-task, file:MEMORY.md, file:memory/]
+# requires: [shell:powershell, tool:llm-task, mcp:google-workspace, file:MEMORY.md, file:memory/]
 env:
   WORKSPACE: C:\Users\tyson\.openclaw\workspace
 steps:
   - id: system_health
-    command: powershell.exe -NoProfile -Command "Write-Output (Get-CimInstance Win32_OperatingSystem | Select-Object @{N='cpu_pct';E={(Get-CimInstance Win32_Processor).LoadPercentage}}, @{N='ram_total_gb';E={[math]::Round($_.TotalVisibleMemorySize/1MB,1)}}, @{N='ram_free_gb';E={[math]::Round($_.FreePhysicalMemory/1MB,1)}}, @{N='ram_used_pct';E={[math]::Round(($_.TotalVisibleMemorySize - $_.FreePhysicalMemory) / $_.TotalVisibleMemorySize * 100,0)}} | ConvertTo-Json); Write-Output '---DISK---'; Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Select-Object DeviceID, @{N='size_gb';E={[math]::Round($_.Size/1GB,1)}}, @{N='free_gb';E={[math]::Round($_.FreeSpace/1GB,1)}}, @{N='used_pct';E={[math]::Round(($_.Size-$_.FreeSpace)/$_.Size*100,0)}} | ConvertTo-Json"
+    command: >-
+      powershell.exe -NoProfile -Command "Write-Output (Get-CimInstance Win32_OperatingSystem | Select-Object @{N='cpu_pct';E={(Get-CimInstance Win32_Processor).LoadPercentage}}, @{N='ram_total_gb';E={[math]::Round($_.TotalVisibleMemorySize/1MB,1)}}, @{N='ram_free_gb';E={[math]::Round($_.FreePhysicalMemory/1MB,1)}}, @{N='ram_used_pct';E={[math]::Round(($_.TotalVisibleMemorySize - $_.FreePhysicalMemory) / $_.TotalVisibleMemorySize * 100,0)}} | ConvertTo-Json); Write-Output '---DISK---'; Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Select-Object DeviceID, @{N='size_gb';E={[math]::Round($_.Size/1GB,1)}}, @{N='free_gb';E={[math]::Round($_.FreeSpace/1GB,1)}}, @{N='used_pct';E={[math]::Round(($_.Size-$_.FreeSpace)/$_.Size*100,0)}} | ConvertTo-Json"
 
   - id: check_crons
-    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Check the cron execution logs from the last 12 hours. Summarize which jobs ran, their outcomes (success/failure), and any anomalies. If no logs are available, note that.","input":{"workspace":"$WORKSPACE"},"schema":{"type":"object","properties":{"jobs_checked":{"type":"integer"},"summary":{"type":"string"},"failures":{"type":"array","items":{"type":"string"}},"anomalies":{"type":"array","items":{"type":"string"}}},"required":["jobs_checked","summary","failures","anomalies"],"additionalProperties":false}}'
+    command: >-
+      openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Check the cron execution logs from the last 12 hours. Summarize which jobs ran, their outcomes (success/failure), and any anomalies. If no logs are available, note that.","input":{"workspace":"$WORKSPACE"},"schema":{"type":"object","properties":{"jobs_checked":{"type":"integer"},"summary":{"type":"string"},"failures":{"type":"array","items":{"type":"string"}},"anomalies":{"type":"array","items":{"type":"string"}}},"required":["jobs_checked","summary","failures","anomalies"],"additionalProperties":false}}'
 
   - id: check_prep
-    command: powershell.exe -NoProfile -Command "$d = (Get-Date).ToString('yyyy-MM-dd'); $f = \"$env:WORKSPACE\\memory\\$d-prep.md\"; if (Test-Path $f) { Get-Content $f -Raw } else { 'No prep note found.' }"
+    command: >-
+      powershell.exe -NoProfile -Command "$d = (Get-Date).ToString('yyyy-MM-dd'); $f = \"$env:WORKSPACE\\memory\\$d-prep.md\"; if (Test-Path $f) { Get-Content $f -Raw } else { 'No prep note found.' }"
 
   - id: check_standing_orders
-    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Read the Standing Orders table from MEMORY.md. Report the status of each active order: name, last_run, last_result, and whether any are overdue or in failure state.","input":{"memory_file":"$WORKSPACE/MEMORY.md"},"schema":{"type":"object","properties":{"active_orders":{"type":"integer"},"orders":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"status":{"type":"string"},"last_run":{"type":"string"},"last_result":{"type":"string"}},"required":["name","status"]}},"overdue":{"type":"array","items":{"type":"string"}},"failures":{"type":"array","items":{"type":"string"}}},"required":["active_orders","orders","overdue","failures"],"additionalProperties":false}}'
+    command: >-
+      openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"Read the Standing Orders table from MEMORY.md. Report the status of each active order: name, last_run, last_result, and whether any are overdue or in failure state.","input":{"memory_file":"$WORKSPACE/MEMORY.md"},"schema":{"type":"object","properties":{"active_orders":{"type":"integer"},"orders":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"status":{"type":"string"},"last_run":{"type":"string"},"last_result":{"type":"string"}},"required":["name","status"]}},"overdue":{"type":"array","items":{"type":"string"}},"failures":{"type":"array","items":{"type":"string"}}},"required":["active_orders","orders","overdue","failures"],"additionalProperties":false}}'
+
+  - id: check_calendar
+    command: >-
+      powershell.exe -NoProfile -Command "$today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $tomorrow = (Get-Date).AddDays(1).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $init = '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"jarvis\",\"version\":\"1.0\"}}}'; $call = '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"calendar_get_events\",\"arguments\":{\"user_id\":\"tyson.so1122@gmail.com\",\"calendar_id\":\"primary\",\"time_min\":\"' + $today + '\",\"time_max\":\"' + $tomorrow + '\",\"timezone\":\"Australia/Adelaide\"}}}'; ($init + \"`n\" + $call) | node C:\\Users\\tyson\\mcp-google-workspace\\dist\\server.js 2>$null | Select-Object -Last 1"
+    continueOnError: true
+
+  - id: check_email
+    command: >-
+      powershell.exe -NoProfile -Command "$init = '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"jarvis\",\"version\":\"1.0\"}}}'; $call = '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"gmail_query_emails\",\"arguments\":{\"user_id\":\"tyson.so1122@gmail.com\",\"query\":\"is:unread\",\"max_results\":5}}}'; ($init + \"`n\" + $call) | node C:\\Users\\tyson\\mcp-google-workspace\\dist\\server.js 2>$null | Select-Object -Last 1"
+    continueOnError: true
 
   - id: synthesise
-    command: openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"You are JARVIS. Compile a morning briefing from the provided data. Produce two outputs: a [VOICE] version (under 30 seconds reading time, conversational, dry wit, no padding) and a [DISPLAY] version (structured markdown with sections for System Health, Overnight Jobs, Standing Orders, Prep Notes, and Open Items). Vary the opening — never start with Good morning twice the same way.","input":{"system_health":"$system_health","cron_status":$check_crons.json,"prep_note":"$check_prep","standing_orders":$check_standing_orders.json},"schema":{"type":"object","properties":{"voice":{"type":"string"},"display":{"type":"string"}},"required":["voice","display"],"additionalProperties":false},"model":"anthropic/claude-sonnet-4-5"}'
+    command: >-
+      openclaw.invoke --tool llm-task --action json --args-json '{"prompt":"You are JARVIS. Compile a morning briefing from the provided data. Produce two outputs: a [VOICE] version (under 30 seconds reading time, conversational, dry wit, no padding) and a [DISPLAY] version (structured markdown with sections for System Health, Overnight Jobs, Standing Orders, Today'\''s Calendar, Unread Emails, Prep Notes, and Open Items). Include calendar events and unread email summaries if available. Vary the opening — never start with Good morning twice the same way.","input":{"system_health":"$system_health","cron_status":$check_crons.json,"prep_note":"$check_prep","standing_orders":$check_standing_orders.json,"calendar":"$check_calendar","email":"$check_email"},"schema":{"type":"object","properties":{"voice":{"type":"string"},"display":{"type":"string"}},"required":["voice","display"],"additionalProperties":false},"model":"anthropic/claude-sonnet-4-5"}'
     stdin: $check_standing_orders.stdout
 
   - id: deliver
-    command: openclaw.invoke --tool message --action send --args-json '{"text":"$synthesise.json.voice\n\n$synthesise.json.display"}'
+    command: >-
+      openclaw.invoke --tool message --action send --args-json '{"text":"$synthesise.json.voice\n\n$synthesise.json.display"}'

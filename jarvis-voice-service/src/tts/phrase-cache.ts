@@ -28,6 +28,17 @@ const CACHED_PHRASES = [
   'Not certain about that, sir.',
   'Of course.',
   'Understood.',
+  // Auto-greeting phrases — pre-synthesized for instant playback
+  'Good morning, sir.',
+  'Morning, sir. Systems nominal.',
+  'Good morning. All systems online.',
+  'Afternoon, sir.',
+  'Good afternoon, sir.',
+  'Good evening, sir.',
+  'Evening, sir.',
+  'Burning the midnight oil, sir.',
+  'Late one tonight, sir.',
+  'Quiet night, sir. Systems nominal.',
 ];
 
 export class PhraseCache {

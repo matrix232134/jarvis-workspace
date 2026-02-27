@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { Service, Device, CronJob } from "@/lib/types"
+import type { Service, Device, CronJob, BridgeDevice } from "@/lib/types"
 
 const POLL_INTERVAL_MS = 30000
 
@@ -16,6 +16,7 @@ interface ApiSystemResponse {
     tailscaleIp: string
   }
   devices: Array<{ name: string; id: string; os?: string; online?: boolean; ip?: string; isSelf?: boolean }>
+  bridgeDevices?: Array<{ id: string; name: string; createdAt: string }>
   capabilities: {
     model: string
     skills: number
@@ -67,15 +68,76 @@ function mapServices(api: ApiSystemResponse["services"]): Service[] {
   return services
 }
 
-function mapDevices(api: ApiSystemResponse["devices"]): Device[] {
-  return api.map((d) => ({
-    id: d.id,
-    name: d.name,
-    online: d.online ?? true,
-    primary: d.isSelf ?? false,
-    os: d.os,
-    ip: d.ip,
-  }))
+function mapDevices(
+  tailscale: ApiSystemResponse["devices"],
+  bridge?: ApiSystemResponse["bridgeDevices"],
+): Device[] {
+  // Start with Tailscale devices
+  const devices: Device[] = tailscale.map((d) => {
+    // Check if this Tailscale device also has a bridge registration (match by name)
+    const bridgeMatch = bridge?.find(
+      (b) => b.name.toLowerCase() === d.name.toLowerCase(),
+    )
+    return {
+      id: d.id,
+      name: d.name,
+      online: d.online ?? true,
+      primary: d.isSelf ?? false,
+      os: d.os,
+      ip: d.ip,
+      source: bridgeMatch ? ("both" as const) : ("tailscale" as const),
+      bridgeId: bridgeMatch?.id,
+    }
+  })
+
+  // Add bridge-only devices (not in Tailscale)
+  if (bridge) {
+    const tsNames = new Set(tailscale.map((d) => d.name.toLowerCase()))
+    for (const b of bridge) {
+      if (!tsNames.has(b.name.toLowerCase())) {
+        devices.push({
+          id: b.id,
+          name: b.name,
+          online: false, // Can't determine without live WS query
+          primary: false,
+          source: "bridge",
+          bridgeId: b.id,
+        })
+      }
+    }
+  }
+
+  return devices
+}
+
+function formatTimeAgo(ms: number): string {
+  const diff = Date.now() - ms
+  if (diff < 0) return "just now"
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+  if (days > 0) return `${days}d ago`
+  if (hours > 0) return `${hours}h ago`
+  if (minutes > 0) return `${minutes}m ago`
+  return "just now"
+}
+
+function formatDuration(ms: number | null): string {
+  if (!ms) return "\u2014"
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`
+}
+
+function formatModelShort(model: string): string {
+  if (!model) return "\u2014"
+  return model
+    .replace("anthropic/", "")
+    .replace("claude-", "Claude ")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (c: string) => c.toUpperCase())
 }
 
 function formatTimeAgo(ms: number): string {
@@ -156,7 +218,7 @@ export function useSystemData(): SystemData {
       if (mountedRef.current) {
         setData({
           services: mapServices(api.services),
-          devices: mapDevices(api.devices),
+          devices: mapDevices(api.devices, api.bridgeDevices),
           crons: mapCrons(api.cronJobs),
           skills: api.capabilities.skillNames ?? [],
           model: api.capabilities.model,

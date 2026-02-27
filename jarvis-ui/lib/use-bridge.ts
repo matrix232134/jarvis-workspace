@@ -172,13 +172,13 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
       backoffRef.current = INITIAL_BACKOFF_MS
       setStatusSync("authenticating")
 
-      // Send auth with voice + screen capabilities
+      // Send auth with voice + screen + browser capabilities
       const creds = loadCredentials()
       let payload: Record<string, unknown>
       if (creds) {
-        payload = { deviceId: creds.deviceId, token: creds.token, capabilities: ["voice", "screen"] }
+        payload = { deviceId: creds.deviceId, token: creds.token, capabilities: ["voice", "screen", "browser"] }
       } else {
-        payload = { pairingToken, deviceName, capabilities: ["voice", "screen"] }
+        payload = { pairingToken, deviceName, capabilities: ["voice", "screen", "browser"] }
       }
 
       ws.send(JSON.stringify({
@@ -224,7 +224,15 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
         case "chat.done":
           handleChatDone(frame)
           break
+        case "device.command":
+          handleDeviceCommand(frame)
+          break
         case "error":
+          // If we get an error during auth phase, clear stale creds so next attempt tries pairing
+          if (statusRef.current === "authenticating") {
+            console.warn("Bridge: auth failed —", frame.payload.message, "— clearing stored credentials")
+            localStorage.removeItem(STORAGE_KEY)
+          }
           handleError(frame)
           break
         case "pong":
@@ -235,9 +243,13 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
 
     ws.onclose = () => {
       if (!mountedRef.current) return
+      const wasConnected = statusRef.current === "connected"
       stopKeepalive()
       setStatusSync("disconnected")
       rejectAllPending("Connection lost")
+      if (wasConnected) {
+        console.log("Bridge: disconnected")
+      }
       scheduleReconnect()
     }
 
@@ -360,6 +372,93 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
     setIsProcessing(false)
   }
 
+  function handleDeviceCommand(frame: BridgeFrame) {
+    const subsystem = frame.payload.subsystem as string
+    const action = frame.payload.action as string
+    const params = (frame.payload.params as Record<string, unknown>) ?? {}
+    const command = `${subsystem}.${action}`
+
+    let success = true
+    let result = ""
+
+    try {
+      switch (command) {
+        case "browser.open": {
+          const url = params.url as string
+          if (url) {
+            window.open(url, "_blank", "noopener")
+            result = `Opened ${url}`
+          } else {
+            success = false
+            result = "No URL provided"
+          }
+          break
+        }
+        case "browser.search": {
+          const query = params.query as string
+          if (query) {
+            window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank", "noopener")
+            result = `Searched for "${query}"`
+          } else {
+            success = false
+            result = "No query provided"
+          }
+          break
+        }
+        case "notify.send": {
+          const title = (params.title as string) || "JARVIS"
+          const body = (params.message as string) || ""
+          if ("Notification" in window) {
+            if (Notification.permission === "granted") {
+              new Notification(title, { body })
+              result = "Notification sent"
+            } else if (Notification.permission !== "denied") {
+              Notification.requestPermission().then((perm) => {
+                if (perm === "granted") new Notification(title, { body })
+              })
+              result = "Permission requested"
+            } else {
+              success = false
+              result = "Notifications blocked by browser"
+            }
+          } else {
+            success = false
+            result = "Notifications not supported"
+          }
+          break
+        }
+        case "clipboard.set": {
+          const text = params.text as string
+          if (text && navigator.clipboard) {
+            navigator.clipboard.writeText(text).catch(() => {})
+            result = "Copied to clipboard"
+          } else {
+            success = false
+            result = text ? "Clipboard API not available" : "No text provided"
+          }
+          break
+        }
+        default:
+          success = false
+          result = `Unknown browser command: ${command}`
+      }
+    } catch (err) {
+      success = false
+      result = err instanceof Error ? err.message : "Command failed"
+    }
+
+    // Send response back to bridge
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "device.response",
+        id: frame.id,
+        payload: { success, result },
+      }))
+    }
+    console.log(`Bridge: device.command ${command} →`, success ? result : `ERROR: ${result}`)
+  }
+
   function handleError(frame: BridgeFrame) {
     const resolver = pendingRef.current.get(frame.id)
     if (resolver) {
@@ -380,7 +479,7 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
     backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF_MS)
   }
 
-  const sendChat = useCallback(async (text: string): Promise<{ voiceText: string | null; artifacts?: ArtifactRef[] }> => {
+  const sendChat = useCallback(async (text: string): Promise<{ voiceText: string | null; artifacts?: ArtifactRef[]; displays?: Array<{ title: string; content: string }> }> => {
     // Add user message immediately
     const userMsg: Message = {
       type: "user",
@@ -438,7 +537,7 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
 
       // Message already displayed by handleChatDone — just extract results
       const parsed = parseJarvisResponse(content)
-      return { voiceText: parsed.voice?.text ?? null, artifacts: parsed.artifacts }
+      return { voiceText: parsed.voice?.text ?? null, artifacts: parsed.artifacts, displays: parsed.displays }
     } catch (err) {
       const detail = err instanceof Error ? err.message : "Unknown error"
       const errorMsg: Message = {
@@ -475,7 +574,7 @@ export function useBridge({ url, pairingToken, deviceName, onVoiceFrame, onBinar
       }, 200)
       const timeout = setTimeout(() => {
         clearInterval(interval)
-        reject(new Error("Connection timeout — bridge unreachable"))
+        reject(new Error("Bridge unreachable — is jarvis-bridge running on port 19300?"))
       }, timeoutMs)
     })
   }

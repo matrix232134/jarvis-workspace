@@ -32,6 +32,7 @@ export class OpenClawStreamClient {
   async *streamChat(
     messages: ChatMessage[],
     signal?: AbortSignal,
+    model = 'anthropic/claude-sonnet-4-5',
   ): AsyncGenerator<string> {
     const url = `${this.config.url}/v1/chat/completions`;
 
@@ -51,7 +52,7 @@ export class OpenClawStreamClient {
           Authorization: `Bearer ${this.config.token}`,
         },
         body: JSON.stringify({
-          model: 'openclaw:main',
+          model,
           messages,
           stream: true,
         }),

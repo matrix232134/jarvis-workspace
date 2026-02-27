@@ -8,3 +8,8 @@ node_modules/
 .next/
 .env*.local
 .DS_Store
+tsconfig.tsbuildinfo
+
+# Large WASM/model binaries (served locally, not tracked)
+public/onnxruntime/
+public/openwakeword/

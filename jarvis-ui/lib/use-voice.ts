@@ -4,17 +4,18 @@
  * Browser voice hook — mic capture + optional wake word + streaming voice pipeline.
  *
  * Captures mic audio via Web Audio API, feeds frames to:
- * 1. Porcupine Web (if available) for local "JARVIS" wake word detection
+ * 1. OpenWakeWord (ONNX-based) for local "hey jarvis" wake word detection
  * 2. Bridge binary frames when streaming (after wake word or mic button)
  *
  * Plays received TTS audio through Web Audio API.
- * Falls back to mic-button-only mode if Porcupine is unavailable.
+ * Falls back to mic-button-only mode if wake word models fail to load.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import type { BridgeFrame } from "./use-bridge"
 import type { Message } from "@/lib/types"
 import { parseJarvisResponse } from "./parse-response"
+import { OpenWakeWordDetector } from "./open-wake-word"
 
 // Binary frame header: [36-byte sessionId ASCII][1-byte direction][PCM audio]
 const AUDIO_HEADER_LENGTH = 37
@@ -25,7 +26,6 @@ const MIC_FRAME_LENGTH = 512
 export type VoiceStatus = "unavailable" | "initializing" | "ready" | "listening" | "streaming" | "playing"
 
 interface UseVoiceOptions {
-  accessKey: string
   enabled: boolean
   sendFrame: (frame: BridgeFrame) => void
   sendBinary: (data: ArrayBuffer) => void
@@ -33,17 +33,18 @@ interface UseVoiceOptions {
   onShowArtifact?: (artifact: { type: string; title: string; content: string; language?: string }) => void
 }
 
-export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessage, onShowArtifact }: UseVoiceOptions) {
+export function useVoice({ enabled, sendFrame, sendBinary, onAddMessage, onShowArtifact }: UseVoiceOptions) {
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("unavailable")
   const [transcript, setTranscript] = useState("")
-  const [hasPorcupine, setHasPorcupine] = useState(false)
+  const [hasWakeWord, setHasWakeWord] = useState(false)
 
   const statusRef = useRef<VoiceStatus>("unavailable")
   const sessionIdRef = useRef<string | null>(null)
   const textOnlySessionRef = useRef(false)
-  const porcupineRef = useRef<any>(null)
+  const wakeWordRef = useRef<OpenWakeWordDetector | null>(null)
   const micStreamRef = useRef<MediaStream | null>(null)
   const micContextRef = useRef<AudioContext | null>(null)
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
   const playContextRef = useRef<AudioContext | null>(null)
   const nextPlayTimeRef = useRef(0)
@@ -51,6 +52,8 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
   const lastAudioTimeRef = useRef(0) // Date.now() of last binary audio chunk received
   const speechCompleteRef = useRef(false) // true once voice.speech_complete arrives
   const isNewResponseRef = useRef(true) // true until first chunk of a response schedules
+  const processingCueRef = useRef<{ ctx: AudioContext; stop: () => void } | null>(null)
+  const processingCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(true)
   const loggedStreamingRef = useRef(false)
 
@@ -74,30 +77,161 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     setVoiceStatus(s)
   }, [])
 
-  // --- Chime generation via Web Audio API ---
+  // --- Chime generation via Web Audio API (layered synthesis) ---
   const playChime = useCallback((type: "listening" | "sessionEnd" | "proactive") => {
     try {
       const ctx = new AudioContext()
-      const freqs = type === "listening" ? [880, 1100] :
-                    type === "proactive" ? [660, 880, 1100] :
-                    [880, 660]
-      const noteDur = type === "listening" ? 0.08 : 0.06
-      let time = ctx.currentTime + 0.01
+      const now = ctx.currentTime + 0.01
 
-      for (const freq of freqs) {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.frequency.value = freq
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        gain.gain.setValueAtTime(0.15, time)
-        gain.gain.exponentialRampToValueAtTime(0.001, time + noteDur)
-        osc.start(time)
-        osc.stop(time + noteDur)
-        time += noteDur + 0.02
+      // Layered synthesis: dual slightly-detuned sine waves + triangle undertone.
+      // Frequencies in the vocal overtone range (392-523Hz), not UI ping range (880Hz+).
+      const configs: Record<string, Array<{
+        freq: number; detune: number; start: number; dur: number; gain: number;
+        undertoneFreq?: number; undertoneGain?: number;
+      }>> = {
+        listening: [
+          // Ascending minor third — "I'm here"
+          { freq: 440, detune: 2, start: 0, dur: 0.06, gain: 0.10, undertoneFreq: 220, undertoneGain: 0.03 },
+          { freq: 523, detune: 3, start: 0.07, dur: 0.07, gain: 0.08, undertoneFreq: 262, undertoneGain: 0.025 },
+        ],
+        proactive: [
+          // Two-note ascending — gentle "ahem"
+          { freq: 392, detune: 2, start: 0, dur: 0.06, gain: 0.12, undertoneFreq: 196, undertoneGain: 0.04 },
+          { freq: 494, detune: 3, start: 0.09, dur: 0.08, gain: 0.10, undertoneFreq: 247, undertoneGain: 0.03 },
+        ],
+        sessionEnd: [
+          // Single descending note — presence withdrawing, very quiet
+          { freq: 494, detune: 1, start: 0, dur: 0.05, gain: 0.04 },
+          { freq: 415, detune: 1, start: 0.04, dur: 0.04, gain: 0.025 },
+        ],
       }
-      setTimeout(() => ctx.close(), (time - ctx.currentTime) * 1000 + 200)
+
+      const notes = configs[type]
+      for (const note of notes) {
+        // Primary oscillator (sine)
+        const osc1 = ctx.createOscillator()
+        const gain1 = ctx.createGain()
+        osc1.type = "sine"
+        osc1.frequency.value = note.freq
+        osc1.connect(gain1)
+        gain1.connect(ctx.destination)
+
+        const t = now + note.start
+        gain1.gain.setValueAtTime(0, t)
+        gain1.gain.linearRampToValueAtTime(note.gain, t + 0.005)
+        gain1.gain.setValueAtTime(note.gain, t + note.dur - 0.015)
+        gain1.gain.exponentialRampToValueAtTime(0.001, t + note.dur)
+        osc1.start(t)
+        osc1.stop(t + note.dur + 0.02)
+
+        // Detuned second oscillator (sine, +N cents) — creates warmth
+        const osc2 = ctx.createOscillator()
+        const gain2 = ctx.createGain()
+        osc2.type = "sine"
+        osc2.frequency.value = note.freq
+        osc2.detune.value = note.detune
+        osc2.connect(gain2)
+        gain2.connect(ctx.destination)
+
+        gain2.gain.setValueAtTime(0, t)
+        gain2.gain.linearRampToValueAtTime(note.gain * 0.7, t + 0.005)
+        gain2.gain.setValueAtTime(note.gain * 0.7, t + note.dur - 0.015)
+        gain2.gain.exponentialRampToValueAtTime(0.001, t + note.dur)
+        osc2.start(t)
+        osc2.stop(t + note.dur + 0.02)
+
+        // Triangle undertone (optional, one octave below) — adds body
+        if (note.undertoneFreq && note.undertoneGain) {
+          const osc3 = ctx.createOscillator()
+          const gain3 = ctx.createGain()
+          osc3.type = "triangle"
+          osc3.frequency.value = note.undertoneFreq
+          osc3.connect(gain3)
+          gain3.connect(ctx.destination)
+
+          gain3.gain.setValueAtTime(0, t)
+          gain3.gain.linearRampToValueAtTime(note.undertoneGain, t + 0.008)
+          gain3.gain.setValueAtTime(note.undertoneGain, t + note.dur - 0.02)
+          gain3.gain.exponentialRampToValueAtTime(0.001, t + note.dur)
+          osc3.start(t)
+          osc3.stop(t + note.dur + 0.02)
+        }
+      }
+
+      const totalDur = Math.max(...notes.map(n => n.start + n.dur))
+      setTimeout(() => ctx.close(), (totalDur + 0.3) * 1000)
     } catch { /* ignore audio errors */ }
+  }, [])
+
+  // --- Processing audio cue: subtle tone during LLM latency ---
+  const stopProcessingCue = useCallback(() => {
+    if (processingCueTimerRef.current) {
+      clearTimeout(processingCueTimerRef.current)
+      processingCueTimerRef.current = null
+    }
+    if (processingCueRef.current) {
+      processingCueRef.current.stop()
+      processingCueRef.current = null
+    }
+  }, [])
+
+  const startProcessingCue = useCallback(() => {
+    if (processingCueRef.current) return
+
+    // Wait 600ms before starting — short responses won't need it
+    processingCueTimerRef.current = setTimeout(() => {
+      try {
+        const ctx = new AudioContext()
+        const now = ctx.currentTime
+
+        // Two sine waves slowly drifting in frequency — "systems working"
+        // Very quiet: gain 0.015-0.02. Barely there. More felt than heard.
+        const osc1 = ctx.createOscillator()
+        const osc2 = ctx.createOscillator()
+        const gain1 = ctx.createGain()
+        const gain2 = ctx.createGain()
+
+        osc1.type = "sine"
+        osc1.frequency.setValueAtTime(180, now)
+        osc1.frequency.linearRampToValueAtTime(195, now + 4)  // slow drift up
+
+        osc2.type = "sine"
+        osc2.frequency.setValueAtTime(183, now)               // 3Hz beat frequency
+        osc2.frequency.linearRampToValueAtTime(192, now + 4)   // converges then diverges
+
+        osc1.connect(gain1)
+        osc2.connect(gain2)
+        gain1.connect(ctx.destination)
+        gain2.connect(ctx.destination)
+
+        // Fade in over 200ms
+        gain1.gain.setValueAtTime(0, now)
+        gain1.gain.linearRampToValueAtTime(0.018, now + 0.2)
+        gain2.gain.setValueAtTime(0, now)
+        gain2.gain.linearRampToValueAtTime(0.015, now + 0.2)
+
+        osc1.start(now)
+        osc2.start(now)
+
+        const stop = () => {
+          const t = ctx.currentTime
+          // Fade out over 150ms
+          gain1.gain.cancelScheduledValues(t)
+          gain2.gain.cancelScheduledValues(t)
+          gain1.gain.setValueAtTime(gain1.gain.value, t)
+          gain2.gain.setValueAtTime(gain2.gain.value, t)
+          gain1.gain.linearRampToValueAtTime(0, t + 0.15)
+          gain2.gain.linearRampToValueAtTime(0, t + 0.15)
+          setTimeout(() => {
+            osc1.stop()
+            osc2.stop()
+            ctx.close().catch(() => {})
+          }, 200)
+        }
+
+        processingCueRef.current = { ctx, stop }
+      } catch { /* ignore */ }
+    }, 600)
   }, [])
 
   // --- TTS audio playback ---
@@ -129,6 +263,8 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     source.connect(ctx.destination)
 
     const now = ctx.currentTime
+    const timeSinceLastChunk = Date.now() - lastAudioTimeRef.current
+
     if (nextPlayTimeRef.current < now) {
       if (isNewResponseRef.current) {
         // First chunk of a new response — jitter buffer: schedule 100ms ahead.
@@ -137,10 +273,17 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
         nextPlayTimeRef.current = now + 0.1
         isNewResponseRef.current = false
       } else {
-        // Between TTS sentences (within same response) — minimal gap
-        nextPlayTimeRef.current = now + 0.01
+        nextPlayTimeRef.current = now + 0.02
       }
     }
+
+    // Inter-sentence jitter: if gap between chunks suggests a sentence boundary,
+    // add a tiny random pause (20-60ms). Creates natural speech rhythm.
+    if (timeSinceLastChunk > 80 && lastAudioTimeRef.current > 0) {
+      const jitterMs = 20 + Math.random() * 40  // 20-60ms
+      nextPlayTimeRef.current += jitterMs / 1000
+    }
+
     source.start(nextPlayTimeRef.current)
     nextPlayTimeRef.current += float32.length / 24000
   }, [])
@@ -169,6 +312,7 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
   // --- Session lifecycle ---
   const endSession = useCallback((reason = "ended") => {
     clearFollowUp()
+    stopProcessingCue()
     const sessionId = sessionIdRef.current
     console.log("Voice session ending, reason:", reason, "id:", sessionId?.slice(0, 8) || "none")
     if (sessionId) {
@@ -187,7 +331,7 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     stopPlayback()
     setTranscript("")
     setStatusSync("ready")
-  }, [clearFollowUp, playChime, stopPlayback, setStatusSync])
+  }, [clearFollowUp, playChime, stopPlayback, stopProcessingCue, setStatusSync])
 
   const startFollowUp = useCallback(() => {
     clearFollowUp()
@@ -207,6 +351,9 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     setStatusSync("streaming")
     playChime("listening")
 
+    // Processing cue will start after 600ms if no audio arrives
+    startProcessingCue()
+
     // Pre-create playback AudioContext so it's ready when TTS audio arrives
     if (!playContextRef.current || playContextRef.current.state === "closed") {
       playContextRef.current = new AudioContext({ sampleRate: 24000 })
@@ -219,11 +366,12 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
       id: crypto.randomUUID(),
       payload: { sessionId },
     })
-  }, [clearFollowUp, playChime, setStatusSync])
+  }, [clearFollowUp, playChime, startProcessingCue, setStatusSync])
 
   const handleBargeIn = useCallback(() => {
     if (!sessionIdRef.current) return
     stopPlayback()
+    stopProcessingCue()
     textOnlySessionRef.current = false
     sendFrameRef.current({
       type: "voice.barge_in",
@@ -231,7 +379,7 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
       payload: { sessionId: sessionIdRef.current, keyword: "jarvis" },
     })
     setStatusSync("streaming")
-  }, [stopPlayback, setStatusSync])
+  }, [stopPlayback, stopProcessingCue, setStatusSync])
 
   // --- Manual session toggle (mic button) ---
   const toggleSession = useCallback(() => {
@@ -383,12 +531,21 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
       }
       case "voice.session_end": {
         if (sessionId === sessionIdRef.current) {
-          sessionIdRef.current = null
-          textOnlySessionRef.current = false
-          clearFollowUp()
-          stopPlayback()
-          setTranscript("")
-          setStatusSync("ready")
+          if (speechCompleteRef.current) {
+            // Already waiting for scheduled audio to finish playing —
+            // don't kill playback, let waitForPlaybackEnd handle cleanup.
+            // Just clear the follow-up timer and transcript.
+            clearFollowUp()
+            setTranscript("")
+          } else {
+            // No speech was playing — clean up immediately
+            sessionIdRef.current = null
+            textOnlySessionRef.current = false
+            clearFollowUp()
+            stopPlayback()
+            setTranscript("")
+            setStatusSync("ready")
+          }
         }
         break
       }
@@ -472,10 +629,13 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
       setStatusSync("playing")
     }
 
+    // First audio chunk arrived — kill the processing cue
+    stopProcessingCue()
+
     playAudioChunk(audio)
     // Update AFTER playAudioChunk so waitForPlaybackEnd timing is correct
     lastAudioTimeRef.current = Date.now()
-  }, [playAudioChunk, setStatusSync, clearFollowUp])
+  }, [playAudioChunk, stopProcessingCue, setStatusSync, clearFollowUp])
 
   // Expose frame handler refs for use-bridge
   const voiceFrameRef = useRef<((frame: BridgeFrame) => void) | null>(null)
@@ -483,7 +643,7 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
   voiceFrameRef.current = handleVoiceFrame
   binaryFrameRef.current = handleBinaryFrame
 
-  // --- Initialize mic capture + optional Porcupine ---
+  // --- Initialize mic capture + optional wake word ---
   useEffect(() => {
     if (!enabled) {
       setStatusSync("unavailable")
@@ -493,7 +653,34 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     let cancelled = false
     let stream: MediaStream | null = null
     let audioCtx: AudioContext | null = null
-    let porcupine: any = null
+
+    // Shared handler for mic audio frames (Int16Array, 512 samples)
+    function handleMicFrame(int16: Int16Array) {
+      if (!mountedRef.current) return
+
+      // Feed to OpenWakeWord for wake word detection (if available)
+      if (wakeWordRef.current?.initialized) {
+        try { wakeWordRef.current.processFrame(int16) } catch { /* ignore */ }
+      }
+
+      // If streaming, send audio to bridge
+      if (statusRef.current === "streaming" && sessionIdRef.current && !loggedStreamingRef.current) {
+        console.log("Streaming mic audio to bridge...")
+        loggedStreamingRef.current = true
+      }
+      if (statusRef.current === "streaming" && sessionIdRef.current) {
+        const sessionBytes = new TextEncoder().encode(sessionIdRef.current)
+        const header = new Uint8Array(AUDIO_HEADER_LENGTH)
+        header.set(sessionBytes.subarray(0, SESSION_ID_LENGTH))
+        header[SESSION_ID_LENGTH] = 0x00 // upstream
+
+        const frame = new Uint8Array(AUDIO_HEADER_LENGTH + int16.byteLength)
+        frame.set(header)
+        frame.set(new Uint8Array(int16.buffer), AUDIO_HEADER_LENGTH)
+
+        sendBinaryRef.current(frame.buffer)
+      }
+    }
 
     // Step 1: Set up mic capture (required for voice to work)
     async function initMic() {
@@ -502,7 +689,8 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
           sampleRate: { ideal: MIC_SAMPLE_RATE },
           channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: true,
+          noiseSuppression: false, // off — browser NS kills quiet/distant speech
+          autoGainControl: true,
         },
       })
       if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
@@ -511,95 +699,96 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
       audioCtx = new AudioContext({ sampleRate: MIC_SAMPLE_RATE })
       micContextRef.current = audioCtx
       const source = audioCtx.createMediaStreamSource(stream)
-      const processor = audioCtx.createScriptProcessor(MIC_FRAME_LENGTH, 1, 1)
-      processorRef.current = processor
 
-      processor.onaudioprocess = (e) => {
-        if (!mountedRef.current) return
-
-        const float32 = e.inputBuffer.getChannelData(0)
-
-        // Convert Float32 to Int16
-        const int16 = new Int16Array(float32.length)
-        for (let i = 0; i < float32.length; i++) {
-          const s = Math.max(-1, Math.min(1, float32[i]))
-          int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
-        }
-
-        // Feed to Porcupine for wake word detection (if available)
-        if (porcupineRef.current) {
-          try { porcupineRef.current.process(int16) } catch { /* ignore */ }
-        }
-
-        // If streaming, send audio to bridge
-        if (statusRef.current === "streaming" && sessionIdRef.current && !loggedStreamingRef.current) {
-          console.log("Streaming mic audio to bridge...")
-          loggedStreamingRef.current = true
-        }
-        if (statusRef.current === "streaming" && sessionIdRef.current) {
-          const sessionBytes = new TextEncoder().encode(sessionIdRef.current)
-          const header = new Uint8Array(AUDIO_HEADER_LENGTH)
-          header.set(sessionBytes.subarray(0, SESSION_ID_LENGTH))
-          header[SESSION_ID_LENGTH] = 0x00 // upstream
-
-          const frame = new Uint8Array(AUDIO_HEADER_LENGTH + int16.byteLength)
-          frame.set(header)
-          frame.set(new Uint8Array(int16.buffer), AUDIO_HEADER_LENGTH)
-
-          sendBinaryRef.current(frame.buffer)
-        }
-      }
-
-      source.connect(processor)
-      processor.connect(audioCtx.destination)
-    }
-
-    // Step 2: Try Porcupine wake word (optional — completely isolated)
-    async function initPorcupine() {
-      if (!accessKey || cancelled) return
+      // Try AudioWorkletNode first, fall back to ScriptProcessorNode
+      let usedWorklet = false
       try {
-        const { PorcupineWorker } = await import("@picovoice/porcupine-web")
-        if (cancelled) return
+        await audioCtx.audioWorklet.addModule("/mic-processor.js")
+        const workletNode = new AudioWorkletNode(audioCtx, "mic-processor")
+        workletNodeRef.current = workletNode
 
-        porcupine = await PorcupineWorker.create(
-          accessKey,
-          [{ builtin: "Jarvis" as any, sensitivity: 0.85 }],
-          (detection: { index: number; label: string }) => {
-            if (!mountedRef.current) return
-            console.log("Wake word detected:", detection.label)
+        workletNode.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+          handleMicFrame(new Int16Array(e.data))
+        }
 
-            if (statusRef.current === "ready") {
-              startSession()
-            } else if (statusRef.current === "playing") {
-              handleBargeIn()
-            }
-          },
-          { publicPath: "/porcupine_params.pv", forceWrite: true }
-        )
+        source.connect(workletNode)
+        usedWorklet = true
+      } catch {
+        // AudioWorklet unavailable — fall back to ScriptProcessorNode
+      }
 
-        if (cancelled) { porcupine.release(); return }
-        porcupineRef.current = porcupine
-        setHasPorcupine(true)
-        console.log("Wake word active — say 'JARVIS'")
-      } catch (err) {
-        console.warn("Porcupine unavailable (use mic button):", err)
-        setHasPorcupine(false)
+      if (!usedWorklet) {
+        const processor = audioCtx.createScriptProcessor(MIC_FRAME_LENGTH, 1, 1)
+        processorRef.current = processor
+
+        processor.onaudioprocess = (e) => {
+          const float32 = e.inputBuffer.getChannelData(0)
+          const int16 = new Int16Array(float32.length)
+          for (let i = 0; i < float32.length; i++) {
+            const s = Math.max(-1, Math.min(1, float32[i]))
+            int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+          }
+          handleMicFrame(int16)
+        }
+
+        source.connect(processor)
+        processor.connect(audioCtx.destination)
       }
     }
 
-    // Boot: mic first → status "ready" → then try Porcupine (fire-and-forget)
+    // Step 2: Try OpenWakeWord (optional — completely isolated)
+    async function initWakeWord() {
+      if (cancelled) return
+      try {
+        const detector = new OpenWakeWordDetector()
+        await detector.init("/openwakeword/models", 0.3, () => {
+          if (!mountedRef.current) return
+          const status = statusRef.current
+          console.log(`Wake word detected: hey jarvis (status=${status})`)
+
+          if (status === "ready") {
+            startSession()
+          } else if (status === "playing") {
+            handleBargeIn()
+          } else {
+            console.log(`Wake word ignored — status is "${status}", need "ready" or "playing"`)
+          }
+        })
+
+        if (cancelled) { detector.release(); return }
+
+        if (!detector.initialized) {
+          console.warn("Wake word unavailable: ONNX models failed to initialize")
+          setHasWakeWord(false)
+          return
+        }
+
+        wakeWordRef.current = detector
+        setHasWakeWord(true)
+        console.log("Wake word active — say 'Hey JARVIS'")
+      } catch (err) {
+        console.warn("Wake word unavailable (use mic button):", err)
+        setHasWakeWord(false)
+      }
+    }
+
+    // Boot: mic + wake word in parallel for fastest startup.
+    // ONNX model loading starts immediately while browser shows mic permission prompt.
+    // handleMicFrame already checks wakeWordRef.current?.initialized, so wake word
+    // naturally activates as soon as models finish — no synchronization needed.
     setStatusSync("initializing")
+
+    // Start ONNX model loading immediately (doesn't need mic permission)
+    initWakeWord().catch(() => {})
+
+    // Start mic capture in parallel
     initMic()
       .then(() => {
         if (cancelled) return
-        // Voice is functional now — mic button + text-to-speech work
         setStatusSync("ready")
         console.log("Voice ready — mic active, click mic or type to talk")
-        // Porcupine is a bonus — errors here can't affect voice status
-        initPorcupine().catch(() => {})
       })
       .catch((err) => {
-        // Only mic failure makes voice unavailable
         console.error("Mic init failed:", err)
         if (!cancelled) setStatusSync("unavailable")
       })
@@ -608,6 +797,10 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
       cancelled = true
       mountedRef.current = false
 
+      if (workletNodeRef.current) {
+        workletNodeRef.current.disconnect()
+        workletNodeRef.current = null
+      }
       if (processorRef.current) {
         processorRef.current.disconnect()
         processorRef.current = null
@@ -620,13 +813,13 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
         stream.getTracks().forEach(t => t.stop())
       }
       micStreamRef.current = null
-      if (porcupine) {
-        try { porcupine.release() } catch { /* ignore */ }
+      if (wakeWordRef.current) {
+        try { wakeWordRef.current.release() } catch { /* ignore */ }
       }
-      porcupineRef.current = null
+      wakeWordRef.current = null
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, accessKey])
+  }, [enabled])
 
   // Cleanup playback on unmount
   useEffect(() => {
@@ -634,14 +827,15 @@ export function useVoice({ accessKey, enabled, sendFrame, sendBinary, onAddMessa
     return () => {
       mountedRef.current = false
       stopPlayback()
+      stopProcessingCue()
       clearFollowUp()
     }
-  }, [stopPlayback, clearFollowUp])
+  }, [stopPlayback, stopProcessingCue, clearFollowUp])
 
   return {
     voiceStatus,
     transcript,
-    hasPorcupine,
+    hasWakeWord,
     voiceFrameRef,
     binaryFrameRef,
     endSession,

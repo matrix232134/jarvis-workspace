@@ -23,6 +23,8 @@ import { CartesiaClient } from '../tts/cartesia-client.js';
 import { PhraseCache } from '../tts/phrase-cache.js';
 import { prepareForTTS, stripMarkdown, expandAbbreviations } from '../tts/text-prep.js';
 import { SpeechPriority } from '../types.js';
+import { analyzeContext, getAdelaideHour, type PresenceContext } from '../presence/context-engine.js';
+import * as greetingTracker from '../presence/greeting-tracker.js';
 import type { OpenClawStreamClient } from '../openclaw/openclaw-stream-client.js';
 import type { SpeechPriorityQueue } from '../tts/priority-queue.js';
 import * as logger from '../logger.js';
@@ -46,6 +48,7 @@ export class StreamingOrchestrator extends EventEmitter {
   // Active orchestration state per session
   private activeAbortControllers = new Map<string, AbortController>();
   private fullResponses = new Map<string, string>(); // sessionId → accumulated LLM text
+  private activeContexts = new Map<string, PresenceContext>();
 
   // Ordered audio emission — ensures sentence N plays fully before sentence N+1
   private playbackStates = new Map<string, {
@@ -116,7 +119,27 @@ export class StreamingOrchestrator extends EventEmitter {
         });
       }
 
-      // 2. Build messages with session context
+      // 2. Build presence context for this utterance
+      const presenceCtx = analyzeContext({
+        localHour: getAdelaideHour(),
+        isFirstInteractionToday: greetingTracker.isFirstInteractionToday(),
+        sessionMode: session.mode,
+        exchangePace: this.sessionManager.getExchangePace(sessionId),
+        isProactiveMessage: false,
+        isCrisis: false,
+      });
+      this.activeContexts.set(sessionId, presenceCtx);
+
+      // Mark interaction for first-of-day tracking
+      greetingTracker.markInteraction();
+
+      // Response timing: deliberate pause before complex answers
+      if (presenceCtx.responseDelayMs > 0 && !ackAudio) {
+        await new Promise(r => setTimeout(r, presenceCtx.responseDelayMs));
+        if (abortController.signal.aborted) return;
+      }
+
+      // 3. Build messages with session context
       const messages = this.sessionManager.buildMessages(sessionId, utterance, hasScreen);
 
       // 3. Stream LLM tokens through delivery router + sentence detection + parallel TTS
@@ -146,22 +169,25 @@ export class StreamingOrchestrator extends EventEmitter {
       const enqueueSentence = (text: string) => {
         const idx = sentenceIndex++;
         totalSentences++;
-        this.synthesizeAndEmit(sessionId, text, idx, abortController.signal)
+        const voiceCtx = this.activeContexts.get(sessionId);
+        const controls = voiceCtx ? { speed: voiceCtx.voice.speed, emotion: voiceCtx.voice.emotion } : undefined;
+        this.synthesizeAndEmit(sessionId, text, idx, abortController.signal, controls)
           .then(onSentenceAudioDone)
           .catch(onSentenceAudioDone);
       };
 
-      // Delayed processing ack — if no voice audio is queued within 2s,
+      // Delayed processing ack — if no voice content arrives within 5s,
       // play a cached filler so the user knows JARVIS is working on it.
-      // This covers long-generation requests (artifacts, complex responses).
+      // Only fires for genuinely slow operations (artifacts, complex responses).
       const PROCESSING_ACK_PHRASES = [
         'One moment, sir.',
         'Working on it.',
         'On it, sir.',
       ];
       let processingAckFired = false;
+      let firstVoiceTokenReceived = false;
       const processingAckTimer = !ackAudio ? setTimeout(() => {
-        if (abortController.signal.aborted || totalSentences > 0) return;
+        if (abortController.signal.aborted || totalSentences > 0 || firstVoiceTokenReceived) return;
         const phrase = PROCESSING_ACK_PHRASES[Math.floor(Math.random() * PROCESSING_ACK_PHRASES.length)];
         const audio = this.phraseCache.get(phrase);
         if (audio) {
@@ -175,14 +201,17 @@ export class StreamingOrchestrator extends EventEmitter {
             isFinal: true,
           });
         }
-      }, 2000) : null;
+      }, 5000) : null;
 
       // Delivery router splits [VOICE]/[DISPLAY]/[ACTION]/[ARTIFACT] in real-time
       const deliveryRouter = new DeliveryRouter({
         onVoice: (text) => {
+          if (!firstVoiceTokenReceived) {
+            firstVoiceTokenReceived = true;
+            if (processingAckTimer) clearTimeout(processingAckTimer);
+          }
           const sentence = sentenceDetector.addToken(text);
           if (sentence) {
-            if (processingAckTimer) clearTimeout(processingAckTimer);
             const finalSentence = hasScreen ? sentence : rewriteForVoiceOnly(sentence);
             enqueueSentence(finalSentence);
           }
@@ -265,6 +294,7 @@ export class StreamingOrchestrator extends EventEmitter {
       }
     } finally {
       this.activeAbortControllers.delete(sessionId);
+      this.activeContexts.delete(sessionId);
     }
   }
 
@@ -281,6 +311,7 @@ export class StreamingOrchestrator extends EventEmitter {
       this.activeAbortControllers.delete(sessionId);
     }
     this.playbackStates.delete(sessionId);
+    this.activeContexts.delete(sessionId);
     this.priorityQueue.clearSession(sessionId);
   }
 
@@ -384,6 +415,7 @@ export class StreamingOrchestrator extends EventEmitter {
     text: string,
     index: number,
     signal: AbortSignal,
+    controls?: { speed?: number; emotion?: string[] | null },
   ): Promise<void> {
     if (signal.aborted) return;
 
@@ -424,6 +456,7 @@ export class StreamingOrchestrator extends EventEmitter {
             });
           }
         },
+        controls,
       );
       // Emit a final marker for this sentence
       if (!signal.aborted) {

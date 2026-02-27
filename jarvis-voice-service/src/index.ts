@@ -18,12 +18,18 @@ import { SpeculativeAck } from './orchestrator/speculative-ack.js';
 import { StreamingOrchestrator, type AudioEmission } from './orchestrator/streaming-orchestrator.js';
 import { DisplayQueue } from './orchestrator/display-queue.js';
 import { prepareForTTS } from './tts/text-prep.js';
+import * as greetingTracker from './presence/greeting-tracker.js';
+import { analyzeContext, getAdelaideHour } from './presence/context-engine.js';
 import type { BridgeFrame, VoiceSession } from './types.js';
 import * as logger from './logger.js';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 async function main(): Promise<void> {
   logger.log('JARVIS Voice Service starting...');
   const config = loadConfig();
+
+  // --- Initialize presence state ---
+  greetingTracker.loadState();
 
   // --- Validate bridge credentials ---
   if (!config.bridge.deviceId || !config.bridge.token) {
@@ -263,6 +269,17 @@ async function main(): Promise<void> {
     try {
       const sentences = prepareForTTS(text);
 
+      // Determine voice controls from presence context
+      const presenceCtx = analyzeContext({
+        localHour: getAdelaideHour(),
+        isFirstInteractionToday: greetingTracker.isFirstInteractionToday(),
+        sessionMode: 'command',
+        exchangePace: 'normal',
+        isProactiveMessage: false,
+        isCrisis: false,
+      });
+      const controls = { speed: presenceCtx.voice.speed, emotion: presenceCtx.voice.emotion };
+
       // Fire all TTS requests in parallel, collect audio in order
       const audioPromises = sentences.map(async (sentence, index) => {
         const cached = phraseCache.get(sentence);
@@ -271,7 +288,7 @@ async function main(): Promise<void> {
         const chunks: Buffer[] = [];
         await cartesia.synthesize(sentence, `${sessionId}-tts-${index}`, (chunk) => {
           chunks.push(chunk);
-        });
+        }, controls);
         return { index, audio: Buffer.concat(chunks) };
       });
 
@@ -328,6 +345,7 @@ async function main(): Promise<void> {
   function handleCapabilityChange(frame: BridgeFrame): void {
     const newHasScreen = !!frame.payload.hasScreenDevice;
     const eventDeviceId = frame.payload.deviceId as string;
+    const event = frame.payload.event as string;  // 'connected' | 'disconnected'
     const wasScreenAvailable = hasScreenDevice;
 
     hasScreenDevice = newHasScreen;
@@ -341,6 +359,44 @@ async function main(): Promise<void> {
     if (!wasScreenAvailable && hasScreenDevice && displayQueue.size > 0) {
       flushDisplayQueue();
     }
+
+    // === AUTO-GREETING: JARVIS notices you arrived ===
+    if (event === 'connected' && hasScreenDevice && lastScreenDeviceId) {
+      if (!greetingTracker.hasGreetedToday()) {
+        autoGreet(lastScreenDeviceId);
+      }
+    }
+  }
+
+  async function autoGreet(targetDeviceId: string): Promise<void> {
+    const hour = getAdelaideHour();
+    const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'night';
+    const suggested = greetingTracker.suggestStructure();
+    const queuedCount = displayQueue.size;
+
+    let greetingText: string;
+
+    if (queuedCount > 0) {
+      // Items waiting — mention them
+      greetingText = queuedCount === 1
+        ? `Good ${timeOfDay}, sir. One item while you were away.`
+        : `Good ${timeOfDay}, sir. ${queuedCount} items while you were away.`;
+    } else if (suggested === 'C') {
+      greetingText = 'Sir.';
+    } else if (suggested === 'E') {
+      greetingText = `Quiet ${timeOfDay === 'morning' ? 'night' : 'stretch'}, sir. Systems nominal.`;
+    } else {
+      greetingText = `Good ${timeOfDay}, sir.`;
+    }
+
+    logger.log(`voice: auto-greeting → "${greetingText}" (structure: ${suggested})`);
+    greetingTracker.trackGreeting(suggested);
+    greetingTracker.markInteraction();
+
+    // Small delay — let the UI finish connecting before speaking
+    await new Promise(r => setTimeout(r, 800));
+
+    await speakProactive(targetDeviceId, greetingText);
   }
 
   async function flushDisplayQueue(): Promise<void> {
@@ -389,8 +445,8 @@ async function main(): Promise<void> {
       payload: { targetDeviceId, sessionId: proactiveSessionId, text },
     });
 
-    // Small delay for the chime to play
-    await new Promise(r => setTimeout(r, 400));
+    // Ceremony: chime → deliberate silence → speech
+    await new Promise(r => setTimeout(r, 450));
 
     // Check phrase cache first
     const cached = phraseCache.get(text);
@@ -408,13 +464,23 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Synthesize via Cartesia
+    // Synthesize via Cartesia with proactive voice profile
+    const proactiveCtx = analyzeContext({
+      localHour: getAdelaideHour(),
+      isFirstInteractionToday: greetingTracker.isFirstInteractionToday(),
+      sessionMode: 'command',
+      exchangePace: 'normal',
+      isProactiveMessage: true,
+      isCrisis: false,
+    });
+    const proactiveControls = { speed: proactiveCtx.voice.speed, emotion: proactiveCtx.voice.emotion };
+
     const { prepareForTTS } = await import('./tts/text-prep.js');
     const sentences = prepareForTTS(text);
     for (const sentence of sentences) {
       await cartesia.synthesize(sentence, proactiveSessionId, (chunk) => {
         bridge.sendAudio(proactiveSessionId, chunk);
-      });
+      }, proactiveControls);
     }
 
     // Signal speech complete immediately (audio already sent)
@@ -428,6 +494,60 @@ async function main(): Promise<void> {
   // Expose proactive speech for external use (e.g., heartbeat alerts)
   (globalThis as any).__jarvisProactiveSpeech = speakProactive;
 
+  // --- Proactive speech API (for heartbeat / external callers) ---
+  const speakApi = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // CORS for local tools
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    const json = (code: number, data: unknown) => {
+      res.writeHead(code, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    };
+
+    // POST /speak — make JARVIS say something out loud
+    if (req.method === 'POST' && req.url === '/speak') {
+      let body = '';
+      req.on('data', (c: Buffer) => { body += c.toString(); });
+      req.on('end', async () => {
+        try {
+          const { text } = JSON.parse(body);
+          if (!text) {
+            json(400, { delivered: false, reason: 'no_text' });
+            return;
+          }
+          if (!lastScreenDeviceId) {
+            json(200, { delivered: false, reason: 'no_device' });
+            return;
+          }
+          await speakProactive(lastScreenDeviceId, text);
+          json(200, { delivered: true });
+        } catch (err) {
+          logger.error(`speak API error: ${err}`);
+          json(500, { delivered: false, reason: 'error' });
+        }
+      });
+      return;
+    }
+
+    // GET /status — check if a device is connected
+    if (req.method === 'GET' && req.url === '/status') {
+      json(200, {
+        hasDevice: !!lastScreenDeviceId,
+        hasScreen: hasScreenDevice,
+      });
+      return;
+    }
+
+    json(404, { error: 'not_found' });
+  });
+
+  speakApi.listen(19301, '127.0.0.1', () => {
+    logger.log('speak API: http://127.0.0.1:19301');
+  });
+
   // --- Start bridge connection ---
   bridge.connect();
   await waitForConnection('Bridge', () => bridge.isConnected(), 15_000);
@@ -435,6 +555,7 @@ async function main(): Promise<void> {
   // --- Graceful shutdown ---
   process.on('SIGINT', () => {
     logger.log('Shutting down...');
+    speakApi.close();
     displayQueue.destroy();
     bridge.disconnect();
     cartesia.disconnect();
@@ -443,6 +564,7 @@ async function main(): Promise<void> {
   });
   process.on('SIGTERM', () => {
     logger.log('Shutting down...');
+    speakApi.close();
     displayQueue.destroy();
     bridge.disconnect();
     cartesia.disconnect();

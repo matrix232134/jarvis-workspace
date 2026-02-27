@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import Presence from "../presence"
 import type { Service, Device, CronJob, TrustEntry } from "@/lib/types"
 
@@ -8,6 +8,43 @@ const TRUST_COLORS: Record<TrustEntry["level"], string> = {
   Advisory: "var(--ink-faint)",
   Guided: "var(--accent)",
   Autonomous: "var(--j-green)",
+}
+
+// Known capabilities by device type
+const BROWSER_CAPABILITIES = ["browser.open", "browser.search", "notify.send", "clipboard.set"]
+const BRIDGE_NATIVE_CAPABILITIES = ["apps.launch", "input.click", "screen.capture", "files.read", "files.write"]
+
+function getDeviceCapabilities(device: Device): { name: string; enabled: boolean; source: "browser" | "bridge" }[] {
+  const caps: { name: string; enabled: boolean; source: "browser" | "bridge" }[] = []
+
+  // If this is the current device (the UI), browser caps are always available
+  if (device.primary) {
+    for (const cap of BROWSER_CAPABILITIES) {
+      caps.push({ name: cap, enabled: true, source: "browser" })
+    }
+    // Voice and screen are declared capabilities
+    caps.push({ name: "voice", enabled: true, source: "browser" })
+    caps.push({ name: "screen", enabled: true, source: "browser" })
+  }
+
+  // Bridge native capabilities — only if a bridge agent is installed on that device
+  if (device.source === "both" || (device.source === "bridge" && device.bridgeId)) {
+    for (const cap of BRIDGE_NATIVE_CAPABILITIES) {
+      // For "this device", native caps depend on whether a native agent is also running
+      caps.push({ name: cap, enabled: !device.primary, source: "bridge" })
+    }
+  }
+
+  return caps
+}
+
+function sourceLabel(source?: string): string {
+  switch (source) {
+    case "both": return "Tailscale + Bridge"
+    case "bridge": return "Bridge only"
+    case "tailscale": return "Tailscale only"
+    default: return "Tailscale"
+  }
 }
 
 export default function SystemDrawer({
@@ -30,6 +67,7 @@ export default function SystemDrawer({
   onClose: () => void
 }) {
   const cardRef = useRef<HTMLDivElement>(null)
+  const [setupDownloading, setSetupDownloading] = useState(false)
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -49,6 +87,22 @@ export default function SystemDrawer({
   }, [onClose])
 
   const onlineCount = services.filter((s) => s.online).length
+
+  // Separate: Tailscale/both devices first, then bridge-only
+  const networkDevices = devices.filter((d) => d.source !== "bridge")
+  const bridgeOnlyDevices = devices.filter((d) => d.source === "bridge")
+  const allDevices = [...networkDevices, ...bridgeOnlyDevices]
+
+  const handleDownloadSetup = () => {
+    const ua = navigator.userAgent.toLowerCase()
+    const os = ua.includes("win") ? "windows" : ua.includes("mac") ? "mac" : "linux"
+    setSetupDownloading(true)
+    const a = document.createElement("a")
+    a.href = `/api/device-setup?os=${os}&name=My-Device`
+    a.download = os === "windows" ? "jarvis-agent-setup.bat" : "jarvis-agent-setup.sh"
+    a.click()
+    setTimeout(() => setSetupDownloading(false), 2000)
+  }
 
   return (
     <div
@@ -133,23 +187,11 @@ export default function SystemDrawer({
           ))}
         </div>
 
-        {/* Devices (Tailscale) */}
+        {/* Devices */}
         <SectionLabel label="DEVICES" detail={`${devices.filter((d) => d.online).length}/${devices.length} online`} />
-        <div className="flex flex-col gap-2" style={{ marginBottom: 20 }}>
-          {devices.map((d) => (
-            <div
-              key={d.id}
-              className="flex items-center gap-2.5"
-              style={{
-                padding: "7px 12px",
-                borderRadius: 8,
-                backgroundColor: d.primary ? "var(--accent-faint)" : "transparent",
-                border: d.primary
-                  ? "0.5px solid var(--accent-ring)"
-                  : "0.5px solid var(--border)",
-              }}
-            >
-              {/* Online dot */}
+        <div className="flex flex-col gap-2" style={{ marginBottom: 12 }}>
+          {allDevices.map((d) => (
+            <div key={d.id} className="flex items-center gap-2.5">
               <span
                 className="shrink-0 rounded-full"
                 style={{
@@ -158,33 +200,13 @@ export default function SystemDrawer({
                   backgroundColor: d.online ? "var(--j-green)" : "var(--ink-ghost)",
                 }}
               />
-              {/* Device icon by OS */}
-              {d.os === "iOS" ? (
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink-faint)" }}>
-                  <rect x="5" y="2" width="14" height="20" rx="2" />
-                  <line x1="12" y1="18" x2="12.01" y2="18" />
-                </svg>
-              ) : (
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink-faint)" }}>
-                  <rect x="2" y="3" width="20" height="14" rx="2" />
-                  <line x1="8" y1="21" x2="16" y2="21" />
-                  <line x1="12" y1="17" x2="12" y2="21" />
-                </svg>
-              )}
-              <span className="font-sans" style={{ fontSize: 11, fontWeight: d.primary ? 600 : 400, color: d.online ? "var(--ink)" : "var(--ink-faint)" }}>
+              <DeviceIcon os={d.os} source={d.source} />
+              <span className="font-sans" style={{ fontSize: 13, fontWeight: d.primary ? 500 : 430, color: d.online ? "var(--ink)" : "var(--ink-faint)" }}>
                 {d.name}
               </span>
               {d.primary && (
-                <span
-                  className="font-sans uppercase"
-                  style={{
-                    fontSize: 8,
-                    fontWeight: 700,
-                    color: "var(--accent)",
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  THIS DEVICE
+                <span className="font-mono" style={{ fontSize: 8, color: "var(--accent)" }}>
+                  host
                 </span>
               )}
               <div className="flex-1" />
@@ -195,6 +217,35 @@ export default function SystemDrawer({
               )}
             </div>
           ))}
+        </div>
+
+        {/* Device Setup */}
+        <SectionLabel label="DEVICE SETUP" />
+        <div className="flex items-center gap-2.5" style={{ marginBottom: 20 }}>
+          <button
+            onClick={handleDownloadSetup}
+            className="font-sans cursor-pointer flex items-center gap-2"
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: setupDownloading ? "var(--j-green)" : "var(--accent)",
+              backgroundColor: setupDownloading ? "rgba(52, 199, 89, 0.08)" : "var(--accent-faint)",
+              border: `1px solid ${setupDownloading ? "var(--j-green)" : "var(--accent-ring)"}`,
+              borderRadius: 8,
+              padding: "8px 16px",
+              transition: "all 0.15s",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            {setupDownloading ? "Downloaded" : "Download Agent Installer"}
+          </button>
+          <span className="font-sans" style={{ fontSize: 10, color: "var(--ink-faint)" }}>
+            Run on any device to connect it
+          </span>
         </div>
 
         {/* Scheduled */}
@@ -286,6 +337,36 @@ export default function SystemDrawer({
         </div>
       </div>
     </div>
+  )
+}
+
+function DeviceIcon({ os, source }: { os?: string; source?: string }) {
+  // Bridge-only devices get a different icon
+  if (source === "bridge") {
+    return (
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink-faint)" }}>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    )
+  }
+
+  if (os === "iOS") {
+    return (
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink-faint)" }}>
+        <rect x="5" y="2" width="14" height="20" rx="2" />
+        <line x1="12" y1="18" x2="12.01" y2="18" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--ink-faint)" }}>
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+    </svg>
   )
 }
 

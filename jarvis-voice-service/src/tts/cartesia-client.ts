@@ -82,6 +82,7 @@ export class CartesiaClient {
     text: string,
     contextId?: string,
     onChunk?: (chunk: Buffer) => void,
+    controls?: { speed?: number; emotion?: string[] | null },
   ): Promise<Buffer> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('Cartesia not connected');
@@ -97,12 +98,27 @@ export class CartesiaClient {
 
       this.pending.set(ctxId, { chunks: [], onChunk, resolve, reject, timer });
 
+      // Build voice object with optional experimental controls
+      const voice: Record<string, unknown> = { mode: 'id', id: this.config.voiceId };
+      if (controls) {
+        const expControls: Record<string, unknown> = {};
+        if (controls.speed !== undefined && controls.speed !== 0) {
+          expControls.speed = controls.speed;  // -1.0 to 1.0
+        }
+        if (controls.emotion && controls.emotion.length > 0) {
+          expControls.emotion = controls.emotion;  // e.g. ['anger:lowest']
+        }
+        if (Object.keys(expControls).length > 0) {
+          voice.__experimental_controls = expControls;
+        }
+      }
+
       this.ws!.send(JSON.stringify({
         model_id: this.config.modelId,
         transcript: text,
         continue: false,
         context_id: ctxId,
-        voice: { mode: 'id', id: this.config.voiceId },
+        voice,
         output_format: {
           container: 'raw',
           encoding: this.config.encoding,

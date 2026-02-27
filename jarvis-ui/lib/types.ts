@@ -114,6 +114,9 @@ export interface Device {
   primary: boolean
   os?: string
   ip?: string
+  capabilities?: string[]
+  bridgeId?: string
+  source?: "tailscale" | "bridge" | "both"
 }
 
 export interface CronJob {
@@ -139,4 +142,15 @@ export interface AttentionItem {
   id: string
   text: string
   severity: "info" | "warning" | "critical"
+}
+
+// === Bridge Device Types ===
+
+export interface BridgeDevice {
+  id: string
+  name: string
+  token: string
+  createdAt: string
+  capabilities?: string[]
+  connected?: boolean
 }

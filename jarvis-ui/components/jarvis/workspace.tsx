@@ -27,12 +27,21 @@ import ThinkingIndicator from "./messages/thinking"
 import SystemDrawer from "./overlays/system-drawer"
 import LibraryDrawer from "./overlays/library-drawer"
 import ArtifactPanel from "./overlays/artifact-panel"
+import CanvasPanel from "./overlays/canvas-panel"
 import DisplayModal from "./overlays/display-modal"
 import AttentionBanners from "./overlays/attention"
 
-const BRIDGE_URL = process.env.NEXT_PUBLIC_BRIDGE_URL || "ws://127.0.0.1:19300"
+function resolveBridgeUrl(): string {
+  if (typeof window === "undefined") return "ws://127.0.0.1:19300"
+  const host = window.location.hostname
+  // Remote access via Tailscale (*.ts.net) or any non-local host → use wss
+  if (host !== "localhost" && host !== "127.0.0.1" && !host.startsWith("192.168.")) {
+    return `wss://${host}:19300`
+  }
+  return process.env.NEXT_PUBLIC_BRIDGE_URL || "ws://127.0.0.1:19300"
+}
+const BRIDGE_URL = resolveBridgeUrl()
 const BRIDGE_PAIRING_TOKEN = process.env.NEXT_PUBLIC_BRIDGE_PAIRING_TOKEN || "jarvis-ui"
-const PICOVOICE_ACCESS_KEY = process.env.NEXT_PUBLIC_PICOVOICE_ACCESS_KEY || ""
 
 export default function Workspace() {
   // Theme
@@ -63,7 +72,6 @@ export default function Workspace() {
 
   // Voice pipeline — uses bridge's real sendFrame/sendBinary
   const voice = useVoice({
-    accessKey: PICOVOICE_ACCESS_KEY,
     enabled: true,
     sendFrame: bridge.sendFrame,
     sendBinary: bridge.sendBinary,
@@ -90,10 +98,27 @@ export default function Workspace() {
   const [showOpenItems, setShowOpenItems] = useState(true)
   const [showSystemDrawer, setShowSystemDrawer] = useState(false)
   const [showLibraryDrawer, setShowLibraryDrawer] = useState(false)
+  const [showCanvas, setShowCanvas] = useState(false)
+
+  // Hydrate canvas state from localStorage after mount (avoids SSR mismatch)
+  useEffect(() => {
+    if (localStorage.getItem("jarvis-canvas-panel") === "open") {
+      setShowCanvas(true)
+    }
+  }, [])
+
+  const toggleCanvas = useCallback(() => {
+    setShowCanvas((prev) => {
+      const next = !prev
+      localStorage.setItem("jarvis-canvas-panel", next ? "open" : "closed")
+      return next
+    })
+  }, [])
 
   // Overlay state
   const [activeDisplay, setActiveDisplay] = useState<DisplayCard | null>(null)
   const [attentionItems, setAttentionItems] = useState<AttentionItem[]>([])
+  const [canvasDisplayItems, setCanvasDisplayItems] = useState<Array<{ title: string; content: string }>>([])
   const [inputPrefill, setInputPrefill] = useState<string | null>(null)
 
   // Panel offset for layout compression
@@ -104,12 +129,27 @@ export default function Workspace() {
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [])
-  const panelOffset = artifact.panelOpen ? Math.min(windowWidth * 0.48, 620) : 0
+  const canvasVisible = showCanvas && !artifact.panelOpen
+  const panelOffset = artifact.panelOpen
+    ? Math.min(windowWidth * 0.48, 620)
+    : canvasVisible ? 360 : 0
+
+  // Ctrl+, toggles Canvas panel
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === ",") {
+        e.preventDefault()
+        toggleCanvas()
+      }
+    }
+    document.addEventListener("keydown", handleKey)
+    return () => document.removeEventListener("keydown", handleKey)
+  }, [toggleCanvas])
 
   // Send text message through bridge + speak response
   const handleSend = useCallback(
     async (text: string) => {
-      const { voiceText, artifacts } = await bridge.sendChat(text)
+      const { voiceText, artifacts, displays } = await bridge.sendChat(text)
       if (voiceText) {
         voice.speakResponse(voiceText)
       }
@@ -118,6 +158,10 @@ export default function Workspace() {
         artifact.saveAllToLibrary(artifacts)
         // Open the first one in the panel
         artifact.showArtifact(artifacts[0])
+      }
+      if (displays && displays.length > 0) {
+        // Push display content to Canvas iframe
+        setCanvasDisplayItems((prev) => [...prev, ...displays])
       }
     },
     [bridge.sendChat, voice.speakResponse, artifact.showArtifact, artifact.saveAllToLibrary]
@@ -180,11 +224,12 @@ export default function Workspace() {
         agentCount={runningAgents.length}
         onToggleAgents={() => setShowAgentRail((p) => !p)}
         onOpenLibrary={handleOpenLibrary}
-        onOpenSystem={() => { setShowSystemDrawer(true); setShowLibraryDrawer(false) }}
         isDark={isDark}
         onToggleTheme={toggleTheme}
         audioReactive={audioReactive.active}
         onToggleAudio={audioReactive.toggle}
+        onToggleCanvas={toggleCanvas}
+        showCanvas={canvasVisible}
       />
 
       {/* Sub-agent rail */}
@@ -239,7 +284,7 @@ export default function Workspace() {
         onVoiceToggle={voice.toggleSession}
         voiceReady={voice.voiceStatus !== "unavailable" && voice.voiceStatus !== "initializing"}
         transcript={voice.transcript}
-        hasPorcupine={voice.hasPorcupine}
+        hasWakeWord={voice.hasWakeWord}
         connectionStatus={bridge.status}
         prefill={inputPrefill}
         onPrefillConsumed={handlePrefillConsumed}
@@ -276,6 +321,21 @@ export default function Workspace() {
           history={artifact.history}
           onSelectHistory={artifact.selectFromHistory}
           onClose={artifact.closePanel}
+        />
+      )}
+
+      {canvasVisible && (
+        <CanvasPanel
+          onClose={toggleCanvas}
+          onSendMessage={(text) => handleSend(text)}
+          isDark={isDark}
+          jarvisState={jarvisState}
+          services={systemData.services}
+          devices={systemData.devices}
+          model={systemData.model}
+          heartbeat={systemData.heartbeat}
+          connectionStatus={bridge.status}
+          displayItems={canvasDisplayItems}
         />
       )}
 
