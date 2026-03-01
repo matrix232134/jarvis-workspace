@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JARVIS Demo Artifact</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a1a; color: #c8c8d4; font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; }
+  .hud { position: relative; width: 500px; max-width: 95vw; }
+  .ring { width: 200px; height: 200px; margin: 0 auto 2rem; position: relative; }
+  .ring svg { width: 100%; height: 100%; animation: spin 8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ring .center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+  .ring .center .label { font-size: .7rem; color: #5588aa; text-transform: uppercase; letter-spacing: 2px; }
+  .ring .center .value { font-size: 1.8rem; color: #00d4ff; font-weight: 300; }
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .panel { background: rgba(20, 20, 50, 0.6); border: 1px solid #1a1a3a; border-radius: 8px; padding: 1rem; }
+  .panel h3 { font-size: .65rem; text-transform: uppercase; letter-spacing: 2px; color: #5588aa; margin-bottom: .8rem; }
+  .bar-row { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; font-size: .8rem; }
+  .bar-label { width: 50px; color: #888; }
+  .bar-track { flex: 1; height: 6px; background: #1a1a3a; border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 1.5s ease; }
+  .bar-val { width: 36px; text-align: right; color: #00d4ff; font-size: .75rem; }
+  .log { grid-column: 1 / -1; }
+  .log-line { font-family: 'Cascadia Code', monospace; font-size: .75rem; padding: .25rem 0; border-bottom: 1px solid #111130; color: #6a8; }
+  .log-line .ts { color: #555; margin-right: .5rem; }
+  .footer { text-align: center; margin-top: 1.5rem; font-size: .7rem; color: #333; }
+  .pulse { animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: .6; } 50% { opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="hud">
+  <div class="ring">
+    <svg viewBox="0 0 200 200">
+      <circle cx="100" cy="100" r="85" fill="none" stroke="#1a1a3a" stroke-width="1"/>
+      <circle cx="100" cy="100" r="85" fill="none" stroke="#00d4ff" stroke-width="2" stroke-dasharray="80 20 40 20 60 20" opacity="0.4"/>
+      <circle cx="100" cy="100" r="70" fill="none" stroke="#00d4ff" stroke-width="1" stroke-dasharray="10 10" opacity="0.2"/>
+    </svg>
+    <div class="center">
+      <div class="label">Status</div>
+      <div class="value pulse">Online</div>
+    </div>
+  </div>
+
+  <div class="panels">
+    <div class="panel">
+      <h3>System Resources</h3>
+      <div class="bar-row"><span class="bar-label">CPU</span><div class="bar-track"><div class="bar-fill" id="cpu" style="width:0%;background:#00d4ff"></div></div><span class="bar-val" id="cpuV">—</span></div>
+      <div class="bar-row"><span class="bar-label">Memory</span><div class="bar-track"><div class="bar-fill" id="mem" style="width:0%;background:#40ff80"></div></div><span class="bar-val" id="memV">—</span></div>
+      <div class="bar-row"><span class="bar-label">Disk</span><div class="bar-track"><div class="bar-fill" id="disk" style="width:0%;background:#ffaa00"></div></div><span class="bar-val" id="diskV">—</span></div>
+    </div>
+    <div class="panel">
+      <h3>Session</h3>
+      <div class="bar-row"><span class="bar-label">Uptime</span><span style="color:#00d4ff;font-size:.85rem" id="uptime">8h 31m</span></div>
+      <div class="bar-row"><span class="bar-label">Msgs</span><span style="color:#00d4ff;font-size:.85rem">142</span></div>
+      <div class="bar-row"><span class="bar-label">Model</span><span style="color:#00d4ff;font-size:.85rem">Opus 4.6</span></div>
+    </div>
+    <div class="panel log">
+      <h3>Activity Log</h3>
+      <div id="logArea"></div>
+    </div>
+  </div>
+  <div class="footer">JARVIS HUD — Demo Artifact</div>
+</div>
+
+<script>
+  // Simulated live data
+  function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+  function update() {
+    const cpu = rand(8, 35), mem = rand(40, 65), disk = rand(55, 62);
+    document.getElementById('cpu').style.width = cpu + '%';
+    document.getElementById('cpuV').textContent = cpu + '%';
+    document.getElementById('mem').style.width = mem + '%';
+    document.getElementById('memV').textContent = mem + '%';
+    document.getElementById('disk').style.width = disk + '%';
+    document.getElementById('diskV').textContent = disk + '%';
+  }
+  const logs = [
+    'Heartbeat cycle complete — HEARTBEAT_OK',
+    'Memory scan — no open items flagged',
+    'Gateway connection stable',
+    'Standing orders — none active',
+    'Channel: webchat — latency nominal',
+    'Capability audit — all systems green',
+    'Session continuity maintained',
+  ];
+  let logIdx = 0;
+  function addLog() {
+    const area = document.getElementById('logArea');
+    const now = new Date().toLocaleTimeString('en-AU', { hour12: false });
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.innerHTML = '<span class="ts">' + now + '</span>' + logs[logIdx % logs.length];
+    area.prepend(div);
+    if (area.children.length > 5) area.removeChild(area.lastChild);
+    logIdx++;
+  }
+  update(); addLog();
+  setInterval(update, 3000);
+  setInterval(addLog, 4000);
+</script>
+</body>
+</html>

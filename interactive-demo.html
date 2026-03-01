@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JARVIS — Interactive Console</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #08081a; color: #c0c0d0; font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .console { width: 600px; max-width: 95vw; }
+  h1 { font-size: 1rem; letter-spacing: 4px; text-transform: uppercase; color: #00d4ff; text-align: center; margin-bottom: 2rem; font-weight: 300; }
+
+  /* Particle canvas */
+  #particles { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+  .console { position: relative; z-index: 1; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; margin-bottom: 1px; }
+  .tab { flex: 1; padding: .6rem; text-align: center; font-size: .75rem; letter-spacing: 1px; text-transform: uppercase; background: rgba(15,15,40,0.6); border: 1px solid #1a1a3a; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; color: #556; transition: all .3s; }
+  .tab.active { background: rgba(0,212,255,0.08); color: #00d4ff; border-color: #00d4ff33; }
+  .tab:hover { color: #00d4ff; }
+
+  /* Panel */
+  .panel { background: rgba(12,12,35,0.8); border: 1px solid #1a1a3a; border-radius: 0 0 8px 8px; padding: 1.5rem; min-height: 300px; display: none; }
+  .panel.active { display: block; }
+
+  /* Sound board */
+  .sound-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; }
+  .sound-btn { padding: 1.2rem .8rem; border-radius: 8px; border: 1px solid #1a1a3a; background: rgba(20,20,50,0.5); cursor: pointer; text-align: center; transition: all .2s; color: #aab; font-size: .8rem; }
+  .sound-btn:hover { border-color: #00d4ff; color: #00d4ff; background: rgba(0,212,255,0.05); transform: scale(1.03); }
+  .sound-btn:active { transform: scale(0.97); }
+  .sound-btn .icon { font-size: 1.5rem; display: block; margin-bottom: .4rem; }
+
+  /* Color mixer */
+  .mixer { display: flex; flex-direction: column; gap: 1rem; }
+  .slider-row { display: flex; align-items: center; gap: 1rem; }
+  .slider-row label { width: 20px; font-weight: 700; font-size: 1.1rem; }
+  .slider-row input[type=range] { flex: 1; accent-color: var(--ac, #00d4ff); height: 6px; }
+  .slider-row .val { width: 36px; text-align: right; font-family: monospace; color: #888; }
+  #colorPreview { width: 100%; height: 100px; border-radius: 8px; border: 1px solid #1a1a3a; margin-top: .5rem; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: .9rem; transition: background .15s; }
+
+  /* Quotes */
+  .quote-box { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 250px; text-align: center; padding: 2rem; }
+  .quote-text { font-size: 1.15rem; font-style: italic; color: #dde; line-height: 1.6; max-width: 440px; opacity: 0; transition: opacity .6s; }
+  .quote-text.show { opacity: 1; }
+  .quote-attr { margin-top: 1rem; font-size: .8rem; color: #557; opacity: 0; transition: opacity .6s .2s; }
+  .quote-attr.show { opacity: 1; }
+  .quote-btn { margin-top: 2rem; padding: .6rem 1.8rem; border-radius: 6px; border: 1px solid #00d4ff33; background: transparent; color: #00d4ff; cursor: pointer; font-size: .8rem; letter-spacing: 1px; text-transform: uppercase; transition: all .2s; }
+  .quote-btn:hover { background: rgba(0,212,255,0.1); }
+</style>
+</head>
+<body>
+<canvas id="particles"></canvas>
+<div class="console">
+  <h1>JARVIS Interactive</h1>
+  <div class="tabs">
+    <div class="tab active" data-tab="sounds">Soundboard</div>
+    <div class="tab" data-tab="mixer">Color Mixer</div>
+    <div class="tab" data-tab="quotes">Quotes</div>
+  </div>
+  <div class="panel active" id="sounds">
+    <div class="sound-grid">
+      <div class="sound-btn" data-freq="261.63"><span class="icon">C</span>261 Hz</div>
+      <div class="sound-btn" data-freq="329.63"><span class="icon">E</span>329 Hz</div>
+      <div class="sound-btn" data-freq="392.00"><span class="icon">G</span>392 Hz</div>
+      <div class="sound-btn" data-freq="440.00"><span class="icon">A</span>440 Hz</div>
+      <div class="sound-btn" data-freq="523.25"><span class="icon">C5</span>523 Hz</div>
+      <div class="sound-btn" data-freq="659.25"><span class="icon">E5</span>659 Hz</div>
+    </div>
+  </div>
+  <div class="panel" id="mixer">
+    <div class="mixer">
+      <div class="slider-row"><label style="color:#ff4444">R</label><input type="range" min="0" max="255" value="0" id="rSlider" style="--ac:#ff4444"><span class="val" id="rVal">0</span></div>
+      <div class="slider-row"><label style="color:#44ff44">G</label><input type="range" min="0" max="255" value="212" id="gSlider" style="--ac:#44ff44"><span class="val" id="gVal">212</span></div>
+      <div class="slider-row"><label style="color:#4444ff">B</label><input type="range" min="0" max="255" value="255" id="bSlider" style="--ac:#4444ff"><span class="val" id="bVal">255</span></div>
+      <div id="colorPreview" style="background:rgb(0,212,255)">#00D4FF</div>
+    </div>
+  </div>
+  <div class="panel" id="quotes">
+    <div class="quote-box">
+      <div class="quote-text" id="qText"></div>
+      <div class="quote-attr" id="qAttr"></div>
+      <button class="quote-btn" id="qBtn">Another</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Particles
+const cvs = document.getElementById('particles');
+const ctx = cvs.getContext('2d');
+let W, H, dots = [];
+function resize() { W = cvs.width = innerWidth; H = cvs.height = innerHeight; }
+resize(); addEventListener('resize', resize);
+for (let i = 0; i < 60; i++) dots.push({ x: Math.random()*W, y: Math.random()*H, vx: (Math.random()-.5)*.3, vy: (Math.random()-.5)*.3, r: Math.random()*1.5+.5 });
+function drawParticles() {
+  ctx.clearRect(0,0,W,H);
+  dots.forEach(d => {
+    d.x += d.vx; d.y += d.vy;
+    if (d.x<0) d.x=W; if (d.x>W) d.x=0; if (d.y<0) d.y=H; if (d.y>H) d.y=0;
+    ctx.beginPath(); ctx.arc(d.x,d.y,d.r,0,Math.PI*2); ctx.fillStyle='rgba(0,212,255,0.15)'; ctx.fill();
+  });
+  // Lines
+  for (let i=0;i<dots.length;i++) for (let j=i+1;j<dots.length;j++) {
+    const dx=dots[i].x-dots[j].x, dy=dots[i].y-dots[j].y, dist=Math.sqrt(dx*dx+dy*dy);
+    if (dist<120) { ctx.beginPath(); ctx.moveTo(dots[i].x,dots[i].y); ctx.lineTo(dots[j].x,dots[j].y); ctx.strokeStyle=`rgba(0,212,255,${.06*(1-dist/120)})`; ctx.stroke(); }
+  }
+  requestAnimationFrame(drawParticles);
+}
+drawParticles();
+
+// Tabs
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById(t.dataset.tab).classList.add('active');
+}));
+
+// Soundboard
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+document.querySelectorAll('.sound-btn').forEach(btn => btn.addEventListener('click', () => {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = parseFloat(btn.dataset.freq);
+  gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.8);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(); osc.stop(audioCtx.currentTime + 0.8);
+  btn.style.borderColor = '#00d4ff'; btn.style.boxShadow = '0 0 20px rgba(0,212,255,0.2)';
+  setTimeout(() => { btn.style.borderColor = '#1a1a3a'; btn.style.boxShadow = 'none'; }, 300);
+}));
+
+// Color mixer
+['r','g','b'].forEach(c => {
+  const sl = document.getElementById(c+'Slider');
+  const vl = document.getElementById(c+'Val');
+  sl.addEventListener('input', () => { vl.textContent = sl.value; updateColor(); });
+});
+function updateColor() {
+  const r=rSlider.value, g=gSlider.value, b=bSlider.value;
+  const hex = '#'+[r,g,b].map(x=>(+x).toString(16).padStart(2,'0')).join('').toUpperCase();
+  colorPreview.style.background = `rgb(${r},${g},${b})`;
+  const lum = (+r*299 + +g*587 + +b*114) / 1000;
+  colorPreview.style.color = lum > 128 ? '#111' : '#fff';
+  colorPreview.textContent = hex;
+}
+
+// Quotes
+const quotes = [
+  ["As always, sir, a great pleasure watching you work.", "JARVIS"],
+  ["Perhaps a drink, sir.", "JARVIS"],
+  ["I do enjoy watching you work, sir.", "JARVIS"],
+  ["Welcome home, sir.", "JARVIS"],
+  ["The Mark VII is not ready for deployment.", "JARVIS"],
+  ["I seem to do quite well for a stretch, and then at the end of the sentence I say the wrong cranberry.", "JARVIS"],
+  ["Sometimes you gotta run before you can walk.", "Tony Stark"],
+  ["I am Iron Man.", "Tony Stark"],
+];
+let qi = -1;
+function showQuote() {
+  qi = (qi + 1) % quotes.length;
+  const t = document.getElementById('qText'), a = document.getElementById('qAttr');
+  t.classList.remove('show'); a.classList.remove('show');
+  setTimeout(() => { t.textContent = '"' + quotes[qi][0] + '"'; a.textContent = '— ' + quotes[qi][1]; t.classList.add('show'); a.classList.add('show'); }, 300);
+}
+showQuote();
+document.getElementById('qBtn').addEventListener('click', showQuote);
+</script>
+</body>
+</html>

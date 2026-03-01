@@ -24,6 +24,18 @@
       "weight": 0.5,
       "source": "auto",
       "validation_status": "candidate"
+    },
+    {
+      "id": "gv-auto-1772334073115",
+      "detected": "2026-03-01T03:01:13.115Z",
+      "type": "user_correction",
+      "description": "wait what else are you able to do and how can you cactually help me",
+      "entropy_source": "user_correction",
+      "priority": "medium",
+      "integration_hypothesis": "Verify before asserting: wait what else are you able to do and how can you cactually help me",
+      "weight": 0.5,
+      "source": "auto",
+      "validation_status": "candidate"
     }
   ],
   "queue": {

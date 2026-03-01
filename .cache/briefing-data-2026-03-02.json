@@ -1,0 +1,38 @@
+{
+  "date": "2026-03-02",
+  "day_of_week": "Monday",
+  "prepared_at": "2026-03-01T13:32:00+10:30",
+  "overnight_summary": {
+    "system_health": "nominal",
+    "heartbeat_cycles": "operational",
+    "incidents": [],
+    "standing_orders": []
+  },
+  "open_items": [
+    {
+      "title": "YouTube viral compilation",
+      "status": "assembly pending",
+      "age_days": 3,
+      "priority": "normal",
+      "context": "4 clips downloaded and ready, FFmpeg assembly script written"
+    }
+  ],
+  "trust_state": {
+    "categories_at_advisory": 7,
+    "recent_shifts": 0
+  },
+  "capability_gaps": [
+    {
+      "gap": "Long-running background task management",
+      "occurrences": 5,
+      "status": "open"
+    }
+  ],
+  "memory_health": {
+    "active_lessons": 4,
+    "active_patterns": 2,
+    "preferences": 0,
+    "stale_items": 0
+  },
+  "recommendations": []
+}
